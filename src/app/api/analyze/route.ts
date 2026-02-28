@@ -24,23 +24,40 @@ export async function POST(req: NextRequest) {
 
     // ── Auto-scrape when only a URL is provided ─────────────────────────────
     if (listingUrl && !title) {
-      const isFacebook = listingUrl.includes("facebook.com");
       const scraped = await scrapeListing(listingUrl);
+
       if (!scraped) {
-        const message = isFacebook
-          ? "Facebook Marketplace requires a login to read listings. Please fill in the details manually below."
-          : "Could not automatically read this listing. Please fill in the details manually.";
         return NextResponse.json(
-          { error: "SCRAPE_FAILED", message },
+          { error: "SCRAPE_FAILED", message: "Could not automatically read this listing. Please fill in the details manually." },
           { status: 422 }
         );
       }
-      title         = scraped.title;
-      description   = scraped.description;
-      price         = scraped.price;
-      imageUrls     = scraped.imageUrls.length ? scraped.imageUrls : imageUrls;
+
+      // Partial scrape — got some data but price is missing; send it back so
+      // the form can pre-fill and ask the user only for what's missing.
+      if (scraped.partial || !scraped.price) {
+        return NextResponse.json(
+          {
+            error:   "SCRAPE_PARTIAL",
+            message: "We found the listing but couldn't read the price. The form below is pre-filled — just add the price and hit Run Analysis.",
+            partial: {
+              title:         scraped.title,
+              description:   scraped.description,
+              imageUrls:     scraped.imageUrls,
+              sellerUsername: scraped.sellerUsername,
+              category:      scraped.category,
+            },
+          },
+          { status: 422 }
+        );
+      }
+
+      title          = scraped.title;
+      description    = scraped.description;
+      price          = scraped.price;
+      imageUrls      = scraped.imageUrls.length ? scraped.imageUrls : imageUrls;
       sellerUsername = sellerUsername ?? scraped.sellerUsername;
-      category      = category       ?? scraped.category;
+      category       = category       ?? scraped.category;
     }
 
     // Basic validation

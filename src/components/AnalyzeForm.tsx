@@ -92,8 +92,23 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
       ]);
 
       if (!response.ok) {
-        const data = await response.json().catch(() => ({})) as { error?: string; message?: string };
-        // Scraping failed — drop into the manual form
+        const data = await response.json().catch(() => ({})) as {
+          error?: string;
+          message?: string;
+          partial?: { title?: string; description?: string; imageUrls?: string[]; sellerUsername?: string; category?: string };
+        };
+
+        // Partial scrape — pre-fill whatever we got, show form for missing fields
+        if (data.error === "SCRAPE_PARTIAL" && data.partial) {
+          if (data.partial.title)         setTitle(data.partial.title);
+          if (data.partial.description)   setDescription(data.partial.description);
+          if (data.partial.imageUrls?.length) setImageUrls(data.partial.imageUrls.join(", "));
+          if (data.partial.sellerUsername) setSellerUser(data.partial.sellerUsername);
+          if (data.partial.category)      setCategory(data.partial.category as Category);
+          if (initialUrl)                 setListingUrl(initialUrl);
+          if (initialPlatform)            setPlatform(initialPlatform);
+        }
+
         setError(data.message ?? "Could not read this listing automatically. Please fill in the details manually.");
         setShowManual(true);
         setIsLoading(false);
