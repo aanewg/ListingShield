@@ -44,23 +44,29 @@ export async function POST(req: NextRequest) {
             error:   "SCRAPE_PARTIAL",
             message: "We found the listing but couldn't read the price. The form below is pre-filled — just add the price and hit Run Analysis.",
             partial: {
-              title:         scraped.title,
-              description:   scraped.description,
-              imageUrls:     scraped.imageUrls,
-              sellerUsername: scraped.sellerUsername,
-              category:      scraped.category,
+              title:             scraped.title,
+              description:       scraped.description,
+              imageUrls:         scraped.imageUrls,
+              sellerUsername:    scraped.sellerUsername,
+              sellerReviewCount: scraped.sellerReviewCount,
+              sellerAvgRating:   scraped.sellerAvgRating,
+              sellerIsVerified:  scraped.sellerIsVerified,
+              category:          scraped.category,
             },
           },
           { status: 422 }
         );
       }
 
-      title          = scraped.title;
-      description    = scraped.description;
-      price          = scraped.price;
-      imageUrls      = scraped.imageUrls.length ? scraped.imageUrls : imageUrls;
-      sellerUsername = sellerUsername ?? scraped.sellerUsername;
-      category       = category       ?? scraped.category;
+      title             = scraped.title;
+      description       = scraped.description;
+      price             = scraped.price;
+      imageUrls         = scraped.imageUrls.length ? scraped.imageUrls : imageUrls;
+      sellerUsername    = sellerUsername    ?? scraped.sellerUsername;
+      sellerReviewCount = sellerReviewCount ?? scraped.sellerReviewCount;
+      sellerAvgRating   = sellerAvgRating   ?? scraped.sellerAvgRating;
+      sellerIsVerified  = sellerIsVerified  ?? scraped.sellerIsVerified;
+      category          = category          ?? scraped.category;
     }
 
     // Basic validation

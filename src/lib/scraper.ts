@@ -4,13 +4,17 @@
 // patterns found in server-rendered HTML.
 
 export interface ScrapedListing {
-  title:         string;
-  description:   string;
-  price:         number | null;   // null = visible on page but couldn't parse
-  imageUrls:     string[];
-  sellerUsername?: string;
-  category?:     string;
-  partial?:      boolean;         // true when some fields are missing
+  title:              string;
+  description:        string;
+  price:              number | null;   // null = visible on page but couldn't parse
+  imageUrls:          string[];
+  sellerUsername?:    string;
+  sellerAccountAge?:  number;          // days since account creation
+  sellerReviewCount?: number;
+  sellerAvgRating?:   number;          // 0–5 scale
+  sellerIsVerified?:  boolean;
+  category?:          string;
+  partial?:           boolean;         // true when some fields are missing
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -194,12 +198,19 @@ async function scrapeFacebook(url: string): Promise<ScrapedListing | null> {
           if (dm) description = decodeEntities(dm[1].replace(/\\n/g, " ").replace(/\\"/g, '"'));
         }
 
+        // Seller name from embedded JSON
+        const sellerName =
+          html.match(/"seller_name"\s*:\s*"([^"]{2,60})"/)?.[1] ??
+          html.match(/"__typename"\s*:\s*"User"[^}]{0,150}"name"\s*:\s*"([^"]{2,60})"/)?.[1] ??
+          html.match(/"marketplace_listing_seller"[^}]{0,200}"name"\s*:\s*"([^"]{2,60})"/)?.[1];
+
         return {
-          title:       cleanedTitle,
-          description: description || "Facebook Marketplace listing.",
+          title:           cleanedTitle,
+          description:     description || "Facebook Marketplace listing.",
           price,
-          imageUrls:   ogImage ? [ogImage] : [],
-          partial:     price === null,
+          imageUrls:       ogImage ? [ogImage] : [],
+          sellerUsername:  sellerName ?? undefined,
+          partial:         price === null,
         };
       } catch { continue; }
     }
@@ -210,34 +221,176 @@ async function scrapeFacebook(url: string): Promise<ScrapedListing | null> {
 
 // ─── Platform-specific helpers ────────────────────────────────────────────────
 
+/** Pull __NEXT_DATA__ JSON safely, returning the parsed object or null. */
+function getNextData(html: string): Record<string, unknown> | null {
+  const raw = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i)?.[1];
+  if (!raw) return null;
+  try { return JSON.parse(raw) as Record<string, unknown>; } catch { return null; }
+}
+
 function extractEbayData(html: string): Partial<ScrapedListing> {
   const data: Partial<ScrapedListing> = {};
+
+  // Price
   const priceContent =
     html.match(/itemprop=["']price["'][^>]+content=["']([\d.]+)["']/i)?.[1] ??
     html.match(/content=["']([\d.]+)["'][^>]+itemprop=["']price["']/i)?.[1];
   if (priceContent) data.price = parseFloat(priceContent);
-  const sellerLink = html.match(/\/usr\/([^"'?/\s]{2,50})/)?.[1];
-  if (sellerLink) data.sellerUsername = decodeEntities(sellerLink);
+
+  // Seller username — from /usr/USERNAME in the page
+  const usrLink = html.match(/\/usr\/([^"'?/#\s]{2,50})/)?.[1];
+  if (usrLink) data.sellerUsername = decodeEntities(usrLink);
+
+  // Feedback / review count
+  // eBay embeds: "feedbackCount":1234, "positiveCount":1234, or text "1,234 feedback"
+  const fbRaw =
+    html.match(/"(?:feedbackCount|positiveCount|feedback_count)"\s*:\s*(\d+)/)?.[1] ??
+    html.match(/(\d[\d,]*)\s+(?:feedback|ratings?)\b/i)?.[1]?.replace(/,/g, "");
+  if (fbRaw) data.sellerReviewCount = parseInt(fbRaw, 10);
+
+  // Rating: eBay uses positive-feedback %; convert to 5-star equivalent
+  const posPct = html.match(/"positivePercentage"\s*:\s*([\d.]+)/)?.[1];
+  if (posPct) {
+    data.sellerAvgRating = Math.round((parseFloat(posPct) / 100) * 5 * 10) / 10;
+  }
+
+  // Fallback to JSON-LD aggregateRating
+  if (!data.sellerAvgRating) {
+    const rv = html.match(/"ratingValue"\s*:\s*"?([\d.]+)"?/)?.[1];
+    if (rv) data.sellerAvgRating = parseFloat(rv);
+  }
+  if (!data.sellerReviewCount) {
+    const rc = html.match(/"reviewCount"\s*:\s*"?(\d+)"?/)?.[1];
+    if (rc) data.sellerReviewCount = parseInt(rc, 10);
+  }
+
+  // Top Rated Seller → treat as verified
+  if (/"topRatedSeller"\s*:\s*true/i.test(html) || /top[\s-]rated\s+seller/i.test(html)) {
+    data.sellerIsVerified = true;
+  }
+
   return data;
 }
 
 function extractMercariData(html: string): Partial<ScrapedListing> {
-  const priceMatch = html.match(/"price"\s*:\s*(\d+)/);
-  return priceMatch ? { price: parseInt(priceMatch[1], 10) } : {};
+  const data: Partial<ScrapedListing> = {};
+
+  // Price (simple JSON)
+  const pm = html.match(/"price"\s*:\s*(\d+)/);
+  if (pm) data.price = parseInt(pm[1], 10);
+
+  // __NEXT_DATA__ — most reliable source for seller profile
+  const nd = getNextData(html);
+  const item =
+    (nd?.props as Record<string, unknown> | undefined)?.pageProps?.item ??
+    ((nd?.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined)?.data?.item as Record<string, unknown> | undefined;
+  if (item) {
+    if (!data.price && (item as Record<string, unknown>).price) data.price = parseInt(String((item as Record<string, unknown>).price), 10);
+    const s = (item as Record<string, unknown>).seller as Record<string, unknown> | undefined;
+    if (s) {
+      if (s.name)                   data.sellerUsername    = String(s.name);
+      const rating = s.rating as Record<string, unknown> | undefined;
+      if (rating?.count)            data.sellerReviewCount = Number(rating.count);
+      if (rating?.average)          data.sellerAvgRating   = parseFloat(String(rating.average));
+      if (s.is_verified)            data.sellerIsVerified  = true;
+    }
+  }
+
+  // Fallback patterns
+  if (!data.sellerUsername) {
+    const nm = html.match(/"seller"\s*:\s*\{[^}]{0,300}"name"\s*:\s*"([^"]{2,50})"/)?.[1];
+    if (nm) data.sellerUsername = nm;
+  }
+  if (!data.sellerReviewCount) {
+    const rc = html.match(/"rating"\s*:\s*\{[^}]{0,200}"count"\s*:\s*(\d+)/)?.[1];
+    if (rc) data.sellerReviewCount = parseInt(rc, 10);
+  }
+  if (!data.sellerAvgRating) {
+    const ra = html.match(/"(?:average|stars)"\s*:\s*([\d.]+)/)?.[1];
+    if (ra) data.sellerAvgRating = parseFloat(ra);
+  }
+  if (!data.sellerIsVerified) data.sellerIsVerified = /"is_verified"\s*:\s*true/.test(html);
+
+  return data;
 }
 
 function extractPoshmarkData(html: string): Partial<ScrapedListing> {
   const data: Partial<ScrapedListing> = {};
-  const priceMatch = html.match(/"price"\s*:\s*"?([\d.]+)"?/);
-  if (priceMatch) data.price = parseFloat(priceMatch[1]);
-  const seller = html.match(/\/closet\/([^"'?/\s]{2,40})/)?.[1];
-  if (seller) data.sellerUsername = seller;
+
+  // Price
+  const pm = html.match(/"price"\s*:\s*"?([\d.]+)"?/);
+  if (pm) data.price = parseFloat(pm[1]);
+
+  // Username from closet URL in page
+  const closet = html.match(/\/closet\/([^"'?/#\s]{2,40})/)?.[1];
+  if (closet) data.sellerUsername = closet;
+
+  // __NEXT_DATA__
+  const nd = getNextData(html);
+  const pp = (nd?.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined;
+  const listing = pp?.listing ?? pp?.data as Record<string, unknown> | undefined;
+  const s = (listing as Record<string, unknown> | undefined)?.seller ??
+            (listing as Record<string, unknown> | undefined)?.creator as Record<string, unknown> | undefined;
+  if (s) {
+    if ((s as Record<string, unknown>).handle)            data.sellerUsername    = String((s as Record<string, unknown>).handle);
+    if ((s as Record<string, unknown>).avg_rating)        data.sellerAvgRating   = parseFloat(String((s as Record<string, unknown>).avg_rating));
+    if ((s as Record<string, unknown>).rating_count)      data.sellerReviewCount = parseInt(String((s as Record<string, unknown>).rating_count), 10);
+    if ((s as Record<string, unknown>).identity_verified) data.sellerIsVerified  = true;
+  }
+
+  // Fallback patterns
+  if (!data.sellerAvgRating) {
+    const ra = html.match(/"avg_rating"\s*:\s*"?([\d.]+)"?/)?.[1];
+    if (ra) data.sellerAvgRating = parseFloat(ra);
+  }
+  if (!data.sellerReviewCount) {
+    const rc = html.match(/"rating_count"\s*:\s*(\d+)/)?.[1];
+    if (rc) data.sellerReviewCount = parseInt(rc, 10);
+  }
+  if (!data.sellerIsVerified) data.sellerIsVerified = /"identity_verified"\s*:\s*true/.test(html);
+
   return data;
 }
 
 function extractDepopData(html: string): Partial<ScrapedListing> {
-  const priceMatch = html.match(/"price"\s*:\s*"?([\d.]+)"?/);
-  return priceMatch ? { price: parseFloat(priceMatch[1]) } : {};
+  const data: Partial<ScrapedListing> = {};
+
+  // Price
+  const pm = html.match(/"price"\s*:\s*"?([\d.]+)"?/);
+  if (pm) data.price = parseFloat(pm[1]);
+
+  // __NEXT_DATA__
+  const nd = getNextData(html);
+  const pp = (nd?.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined;
+  const product = pp?.product ?? pp?.data as Record<string, unknown> | undefined;
+  if (product) {
+    if (!data.price && (product as Record<string, unknown>).price)
+      data.price = parseFloat(String((product as Record<string, unknown>).price));
+    const s = (product as Record<string, unknown>).seller as Record<string, unknown> | undefined;
+    if (s) {
+      if (s.username)       data.sellerUsername    = String(s.username);
+      if (s.reviewsTotal)   data.sellerReviewCount = parseInt(String(s.reviewsTotal), 10);
+      if (s.reviewsAverage) data.sellerAvgRating   = parseFloat(String(s.reviewsAverage));
+      if (s.verified)       data.sellerIsVerified  = true;
+    }
+  }
+
+  // Fallback patterns
+  if (!data.sellerUsername) {
+    const un = html.match(/"username"\s*:\s*"([^"]{2,40})"/)?.[1];
+    if (un) data.sellerUsername = un;
+  }
+  if (!data.sellerReviewCount) {
+    const rt = html.match(/"reviewsTotal"\s*:\s*(\d+)/)?.[1];
+    if (rt) data.sellerReviewCount = parseInt(rt, 10);
+  }
+  if (!data.sellerAvgRating) {
+    const ra = html.match(/"reviewsAverage"\s*:\s*([\d.]+)/)?.[1];
+    if (ra) data.sellerAvgRating = parseFloat(ra);
+  }
+  if (!data.sellerIsVerified) data.sellerIsVerified = /"verified"\s*:\s*true/.test(html);
+
+  return data;
 }
 
 // ─── Main scrape function ─────────────────────────────────────────────────────
@@ -274,12 +427,15 @@ export async function scrapeListing(url: string): Promise<ScrapedListing | null>
       : findJsonLdNode(html, ["Offer"])
   ) as Record<string, unknown> | undefined;
 
-  let title         = product?.["name"] as string | undefined;
-  let description   = product?.["description"] as string | undefined;
-  let price         = parsePrice(offer?.["price"] ?? offer?.["lowPrice"]);
-  let imageUrls:    string[] = [];
-  let sellerUsername: string | undefined;
-  let category:     string | undefined;
+  let title:             string | undefined    = product?.["name"] as string | undefined;
+  let description:       string | undefined    = product?.["description"] as string | undefined;
+  let price:             number | null         = parsePrice(offer?.["price"] ?? offer?.["lowPrice"]);
+  let imageUrls:         string[]              = [];
+  let sellerUsername:    string | undefined;
+  let sellerReviewCount: number | undefined;
+  let sellerAvgRating:   number | undefined;
+  let sellerIsVerified:  boolean | undefined;
+  let category:          string | undefined;
 
   const ldImage = product?.["image"];
   if (typeof ldImage === "string") imageUrls.push(ldImage);
@@ -305,9 +461,12 @@ export async function scrapeListing(url: string): Promise<ScrapedListing | null>
   if (url.includes("poshmark.com")) pd = extractPoshmarkData(html);
   if (url.includes("depop.com"))    pd = extractDepopData(html);
 
-  if (!price          && pd.price)          price          = pd.price;
-  if (!sellerUsername && pd.sellerUsername)  sellerUsername = pd.sellerUsername;
-  if (!description    && pd.description)    description    = pd.description;
+  if (!price             && pd.price)             price             = pd.price;
+  if (!sellerUsername    && pd.sellerUsername)    sellerUsername    = pd.sellerUsername;
+  if (!description       && pd.description)       description       = pd.description;
+  if (!sellerReviewCount && pd.sellerReviewCount) sellerReviewCount = pd.sellerReviewCount;
+  if (!sellerAvgRating   && pd.sellerAvgRating)   sellerAvgRating   = pd.sellerAvgRating;
+  if (sellerIsVerified === undefined && pd.sellerIsVerified !== undefined) sellerIsVerified = pd.sellerIsVerified;
 
   // 4. Last-resort price scan
   if (!price) price = priceFromText(html.replace(/<[^>]+>/g, " ").slice(0, 5000));
@@ -321,12 +480,15 @@ export async function scrapeListing(url: string): Promise<ScrapedListing | null>
   if (!title) return null;
 
   return {
-    title:       title.trim(),
-    description: (description ?? "").trim() || "No description available.",
-    price:       price && price > 0 ? price : null,
-    imageUrls:   [...new Set(imageUrls)].slice(0, 5),
+    title:            title.trim(),
+    description:      (description ?? "").trim() || "No description available.",
+    price:            price && price > 0 ? price : null,
+    imageUrls:        [...new Set(imageUrls)].slice(0, 5),
     sellerUsername,
+    sellerReviewCount,
+    sellerAvgRating,
+    sellerIsVerified,
     category,
-    partial:     !price || price <= 0,
+    partial:          !price || price <= 0,
   };
 }
