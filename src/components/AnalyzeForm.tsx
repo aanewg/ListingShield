@@ -66,11 +66,28 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
 
 export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
   const router = useRouter();
+
+  // ── UI state ─────────────────────────────────────────────────────────────
   const [isLoading,       setIsLoading]       = useState(false);
   const [error,           setError]           = useState<string | null>(null);
   const [showManual,      setShowManual]      = useState(!initialUrl);
   const [screenshotState, setScreenshotState] = useState<"idle" | "loading" | "done" | "error">("idle");
 
+  // ── Form state ────────────────────────────────────────────────────────────
+  const [platform,    setPlatform]    = useState<Platform>(initialPlatform ?? "manual");
+  const [title,       setTitle]       = useState("");
+  const [description, setDescription] = useState("");
+  const [price,       setPrice]       = useState("");
+  const [category,    setCategory]    = useState<Category | "">("");
+  const [listingUrl,  setListingUrl]  = useState(initialUrl);
+  const [sellerUser,  setSellerUser]  = useState("");
+  const [accountAge,  setAccountAge]  = useState("");
+  const [reviewCount, setReviewCount] = useState("");
+  const [avgRating,   setAvgRating]   = useState("");
+  const [isVerified,  setIsVerified]  = useState(false);
+  const [imageUrls,   setImageUrls]   = useState("");
+
+  // ── Effects ───────────────────────────────────────────────────────────────
   // If a URL was provided (came from the home page input), auto-submit immediately
   useEffect(() => {
     if (initialUrl) {
@@ -78,6 +95,8 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
 
   async function handleUrlAnalyze(urlToScrape?: string, platformToUse?: Platform) {
     const targetUrl      = urlToScrape ?? initialUrl;
@@ -135,20 +154,6 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
       setIsLoading(false);
     }
   }
-
-  // Form state
-  const [platform,    setPlatform]    = useState<Platform>(initialPlatform ?? "manual");
-  const [title,       setTitle]       = useState("");
-  const [description, setDescription] = useState("");
-  const [price,       setPrice]       = useState("");
-  const [category,    setCategory]    = useState<Category | "">("");
-  const [listingUrl,  setListingUrl]  = useState(initialUrl);
-  const [sellerUser,  setSellerUser]  = useState("");
-  const [accountAge,  setAccountAge]  = useState("");
-  const [reviewCount, setReviewCount] = useState("");
-  const [avgRating,   setAvgRating]   = useState("");
-  const [isVerified,  setIsVerified]  = useState(false);
-  const [imageUrls,   setImageUrls]   = useState("");
 
   async function handleScreenshot(file: File) {
     setScreenshotState("loading");
@@ -218,14 +223,13 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
     };
 
     try {
-      // Run the API call in parallel with the minimum animation duration
       const [response] = await Promise.all([
         fetch("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         }),
-        new Promise((resolve) => setTimeout(resolve, 2800)), // minimum scan time for UX
+        new Promise((resolve) => setTimeout(resolve, 2800)),
       ]);
 
       if (!response.ok) {
@@ -241,11 +245,11 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
     }
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   if (isLoading) return <AnalysisLoader />;
 
-  // If a URL was given but scraping failed, show the error + manual form
-  // If no URL was given, show the manual form directly
-  if (!showManual) return null; // shouldn't reach here — handleUrlAnalyze runs on mount
+  if (!showManual) return null;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
