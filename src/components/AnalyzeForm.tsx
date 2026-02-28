@@ -66,9 +66,10 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
 
 export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
   const router = useRouter();
-  const [isLoading,  setIsLoading]  = useState(false);
-  const [error, setError]           = useState<string | null>(null);
-  const [showManual, setShowManual] = useState(!initialUrl);
+  const [isLoading,       setIsLoading]       = useState(false);
+  const [error,           setError]           = useState<string | null>(null);
+  const [showManual,      setShowManual]      = useState(!initialUrl);
+  const [screenshotState, setScreenshotState] = useState<"idle" | "loading" | "done" | "error">("idle");
 
   // If a URL was provided (came from the home page input), auto-submit immediately
   useEffect(() => {
@@ -148,6 +149,47 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
   const [avgRating,   setAvgRating]   = useState("");
   const [isVerified,  setIsVerified]  = useState(false);
   const [imageUrls,   setImageUrls]   = useState("");
+
+  async function handleScreenshot(file: File) {
+    setScreenshotState("loading");
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("image", file);
+      const res = await fetch("/api/extract-from-screenshot", { method: "POST", body: fd });
+      const data = await res.json() as {
+        error?: string;
+        title?: string | null;
+        price?: number | null;
+        description?: string | null;
+        sellerUsername?: string | null;
+        sellerReviewCount?: number | null;
+        sellerAvgRating?: number | null;
+        sellerIsVerified?: boolean | null;
+        category?: string | null;
+      };
+
+      if (!res.ok || data.error) {
+        setError(data.error ?? "Could not read the screenshot. Try a clearer image.");
+        setScreenshotState("error");
+        return;
+      }
+
+      if (data.title?.trim())       setTitle(data.title.trim());
+      if (data.price != null)       setPrice(String(data.price));
+      if (data.description?.trim()) setDescription(data.description.trim());
+      if (data.sellerUsername)      setSellerUser(data.sellerUsername);
+      if (data.sellerReviewCount != null) setReviewCount(String(data.sellerReviewCount));
+      if (data.sellerAvgRating   != null) setAvgRating(String(data.sellerAvgRating));
+      if (data.sellerIsVerified)    setIsVerified(true);
+      if (data.category)            setCategory(data.category as Category);
+
+      setScreenshotState("done");
+    } catch {
+      setError("Something went wrong reading the screenshot.");
+      setScreenshotState("error");
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -229,7 +271,7 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
           </Select>
         </div>
 
-        {/* URL */}
+        {/* URL + Screenshot */}
         <div>
           <Label optional>Listing URL</Label>
           <div className="flex gap-2">
@@ -249,6 +291,64 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
               </button>
             )}
           </div>
+
+          {/* Screenshot upload row */}
+          <div className="mt-2 flex items-center gap-3">
+            <div className="flex-1 border-t border-[#1e2a3f]" />
+            <span className="text-[10px] text-slate-600 mono uppercase tracking-wider shrink-0">or</span>
+            <div className="flex-1 border-t border-[#1e2a3f]" />
+          </div>
+
+          <label className="mt-2 flex items-center gap-2 cursor-pointer group">
+            <input
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleScreenshot(file);
+                e.target.value = "";
+              }}
+            />
+            <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors w-full justify-center
+              ${screenshotState === "done"
+                ? "border-green-500/40 bg-green-500/10 text-green-400"
+                : screenshotState === "loading"
+                ? "border-purple-500/40 bg-purple-500/10 text-purple-400"
+                : screenshotState === "error"
+                ? "border-red-500/40 bg-red-500/10 text-red-400"
+                : "border-[#1e2a3f] bg-[#111827] text-slate-400 group-hover:border-purple-500/40 group-hover:text-purple-300"
+              }`}>
+              {screenshotState === "loading" ? (
+                <>
+                  <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                  </svg>
+                  <span>Reading screenshot…</span>
+                </>
+              ) : screenshotState === "done" ? (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                  <span>Screenshot extracted — upload another to update</span>
+                </>
+              ) : (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-3.5 w-3.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                  </svg>
+                  <span>Upload a screenshot to auto-fill from image</span>
+                  <span className="ml-1 text-[10px] text-purple-400 border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 rounded mono">AI</span>
+                </>
+              )}
+            </div>
+          </label>
+          <p className="mt-1 text-xs text-slate-600">
+            Works for Facebook Marketplace, or any listing you can screenshot. Claude reads price, title, seller info directly from the image.
+          </p>
         </div>
 
         {/* Title */}
