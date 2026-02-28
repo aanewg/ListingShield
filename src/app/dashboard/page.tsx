@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { DashboardCharts } from "@/components/DashboardCharts";
 import type { TrustTier } from "@/types";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "Dashboard — ListingShield" };
 
 // ─── Data fetchers ────────────────────────────────────────────────────────────

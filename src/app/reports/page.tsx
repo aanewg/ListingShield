@@ -3,6 +3,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { ReportFilters } from "@/components/ReportFilters";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "Community Reports — ListingShield" };
 
 const REPORT_TYPE_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {

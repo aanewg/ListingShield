@@ -106,6 +106,8 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+export const dynamic = "force-dynamic";
+
 export default async function HomePage() {
   const [stats, recentReports] = await Promise.all([getStats(), getRecentReports()]);
 
