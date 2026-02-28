@@ -78,7 +78,11 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleUrlAnalyze() {
+  async function handleUrlAnalyze(urlToScrape?: string, platformToUse?: Platform) {
+    const targetUrl      = urlToScrape ?? initialUrl;
+    const targetPlatform = platformToUse ?? initialPlatform ?? "manual";
+    if (!targetUrl) return;
+
     setIsLoading(true);
     setError(null);
     try {
@@ -86,7 +90,7 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
         fetch("/api/analyze", {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ listingUrl: initialUrl, platform: initialPlatform ?? "manual" }),
+          body:    JSON.stringify({ listingUrl: targetUrl, platform: targetPlatform }),
         }),
         new Promise((resolve) => setTimeout(resolve, 2800)),
       ]);
@@ -112,8 +116,8 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
           if (data.partial.sellerAvgRating   != null) setAvgRating(String(data.partial.sellerAvgRating));
           if (data.partial.sellerIsVerified)   setIsVerified(true);
           if (data.partial.category)           setCategory(data.partial.category as Category);
-          if (initialUrl)                      setListingUrl(initialUrl);
-          if (initialPlatform)                 setPlatform(initialPlatform);
+          setListingUrl(targetUrl);
+          setPlatform(targetPlatform);
         }
 
         setError(data.message ?? "Could not read this listing automatically. Please fill in the details manually.");
@@ -228,12 +232,23 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
         {/* URL */}
         <div>
           <Label optional>Listing URL</Label>
-          <Input
-            type="url"
-            value={listingUrl}
-            onChange={(e) => setListingUrl(e.target.value)}
-            placeholder="https://www.ebay.com/itm/..."
-          />
+          <div className="flex gap-2">
+            <Input
+              type="url"
+              value={listingUrl}
+              onChange={(e) => setListingUrl(e.target.value)}
+              placeholder="https://www.ebay.com/itm/..."
+            />
+            {listingUrl.trim() && (
+              <button
+                type="button"
+                onClick={() => handleUrlAnalyze(listingUrl.trim(), platform)}
+                className="shrink-0 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2.5 text-xs font-semibold text-blue-400 hover:bg-blue-500/20 hover:border-blue-500/60 transition-colors mono whitespace-nowrap"
+              >
+                Fetch Details
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Title */}
