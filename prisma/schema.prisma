@@ -1,0 +1,51 @@
+// ListingShield — Prisma schema (SQLite / Prisma 6)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model ListingAnalysis {
+  id                String     @id @default(cuid())
+  listingUrl        String?
+  platform          String     // "mercari" | "ebay" | "facebook" | "poshmark" | "depop" | "manual"
+  title             String
+  description       String
+  price             Float
+  marketAvgPrice    Float?
+  category          String?
+  sellerUsername    String?
+  sellerAccountAge  Int?       // days
+  sellerReviewCount Int?
+  sellerAvgRating   Float?
+  sellerIsVerified  Boolean    @default(false)
+  imageUrls         String?    // JSON-encoded string[]
+  trustScore        Int        // 0-100
+  trustTier         String     // "highly_trusted" | "looks_good" | "caution" | "risky" | "likely_scam"
+  riskFlags         RiskFlag[]
+  createdAt         DateTime   @default(now())
+}
+
+model RiskFlag {
+  id          String          @id @default(cuid())
+  analysisId  String
+  analysis    ListingAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  flagType    String
+  severity    String          // "low" | "medium" | "high" | "critical"
+  title       String
+  description String
+  confidence  Float           // 0.0-1.0
+}
+
+model UserReport {
+  id         String   @id @default(cuid())
+  listingUrl String
+  platform   String
+  reportType String   // "scam" | "counterfeit" | "fake_reviews" | "bait_switch" | "other"
+  details    String?
+  createdAt  DateTime @default(now())
+}

@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+@theme inline {
+  --font-outfit: "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Background palette */
+  --color-navy:      #06080d;
+  --color-navy-800:  #0d1117;
+  --color-navy-700:  #111827;
+  --color-navy-600:  #1a2235;
+  --color-navy-500:  #243047;
+  --color-navy-400:  #2e3d5a;
+
+  /* Trust tier colours */
+  --color-safe:    #22c55e;
+  --color-teal:    #14b8a6;
+  --color-caution: #eab308;
+  --color-risky:   #f97316;
+  --color-scam:    #ef4444;
+
+  /* Accent */
+  --color-accent:  #3b82f6;
+
+  /* Neutral */
+  --color-muted:   #64748b;
+  --color-border:  #1e2a3f;
+}
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
+html,
+body {
+  background-color: #06080d;
+  color: #e2e8f0;
+  font-family: "Outfit", sans-serif;
+  min-height: 100vh;
+}
+
+/* ── Grid scan-line background ─────────────────────────────────────────────── */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(59, 130, 246, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── Scan-line overlay texture ─────────────────────────────────────────────── */
+.scanlines::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Gauge SVG transition ──────────────────────────────────────────────────── */
+.gauge-arc {
+  transition: stroke-dashoffset 1.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* ── Severity border colours ───────────────────────────────────────────────── */
+.severity-critical { border-left-color: #ef4444; }
+.severity-high     { border-left-color: #f97316; }
+.severity-medium   { border-left-color: #eab308; }
+.severity-low      { border-left-color: #3b82f6; }
+
+/* ── Glow effects ──────────────────────────────────────────────────────────── */
+.glow-safe    { box-shadow: 0 0 24px rgba(34,197,94,0.20); }
+.glow-teal    { box-shadow: 0 0 24px rgba(20,184,166,0.20); }
+.glow-caution { box-shadow: 0 0 24px rgba(234,179,8,0.20); }
+.glow-risky   { box-shadow: 0 0 24px rgba(249,115,22,0.20); }
+.glow-scam    { box-shadow: 0 0 24px rgba(239,68,68,0.20); }
+
+/* ── Mono data text ────────────────────────────────────────────────────────── */
+.mono { font-family: "JetBrains Mono", monospace; }
+
+/* ── Card base ─────────────────────────────────────────────────────────────── */
+.card {
+  background-color: #0d1117;
+  border: 1px solid #1e2a3f;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}
