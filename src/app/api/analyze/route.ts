@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { runFullAnalysis } from "@/lib/detection-engine";
+import { scrapeListing } from "@/lib/scraper";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    const {
+    let {
       platform,
       title,
       description,
@@ -20,6 +21,23 @@ export async function POST(req: NextRequest) {
       imageUrls,
       listingUrl,
     } = body;
+
+    // ── Auto-scrape when only a URL is provided ─────────────────────────────
+    if (listingUrl && !title) {
+      const scraped = await scrapeListing(listingUrl);
+      if (!scraped) {
+        return NextResponse.json(
+          { error: "SCRAPE_FAILED", message: "Could not read this listing automatically. Please fill in the details manually." },
+          { status: 422 }
+        );
+      }
+      title         = scraped.title;
+      description   = scraped.description;
+      price         = scraped.price;
+      imageUrls     = scraped.imageUrls.length ? scraped.imageUrls : imageUrls;
+      sellerUsername = sellerUsername ?? scraped.sellerUsername;
+      category      = category       ?? scraped.category;
+    }
 
     // Basic validation
     if (!platform || !title || !description || price === undefined || price === null) {

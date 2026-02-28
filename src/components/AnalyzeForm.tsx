@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AnalysisLoader } from "./AnalysisLoader";
 import type { Platform, Category } from "@/types";
@@ -66,8 +66,48 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
 
 export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError]         = useState<string | null>(null);
+  const [isLoading,  setIsLoading]  = useState(false);
+  const [error, setError]           = useState<string | null>(null);
+  const [showManual, setShowManual] = useState(!initialUrl);
+
+  // If a URL was provided (came from the home page input), auto-submit immediately
+  useEffect(() => {
+    if (initialUrl) {
+      handleUrlAnalyze();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleUrlAnalyze() {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [response] = await Promise.all([
+        fetch("/api/analyze", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ listingUrl: initialUrl, platform: initialPlatform ?? "manual" }),
+        }),
+        new Promise((resolve) => setTimeout(resolve, 2800)),
+      ]);
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({})) as { error?: string; message?: string };
+        // Scraping failed — drop into the manual form
+        setError(data.message ?? "Could not read this listing automatically. Please fill in the details manually.");
+        setShowManual(true);
+        setIsLoading(false);
+        return;
+      }
+
+      const data = await response.json() as { id: string };
+      router.push(`/results/${data.id}`);
+    } catch {
+      setError("Something went wrong. Please fill in the details manually.");
+      setShowManual(true);
+      setIsLoading(false);
+    }
+  }
 
   // Form state
   const [platform,    setPlatform]    = useState<Platform>(initialPlatform ?? "manual");
@@ -134,6 +174,10 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
   }
 
   if (isLoading) return <AnalysisLoader />;
+
+  // If a URL was given but scraping failed, show the error + manual form
+  // If no URL was given, show the manual form directly
+  if (!showManual) return null; // shouldn't reach here — handleUrlAnalyze runs on mount
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
