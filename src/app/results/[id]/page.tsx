@@ -6,7 +6,9 @@ import { RiskFlagCard } from "@/components/RiskFlagCard";
 import { PriceAnalysis } from "@/components/PriceAnalysis";
 import { SellerProfile } from "@/components/SellerProfile";
 import { DescriptionAnalysis } from "@/components/DescriptionAnalysis";
+import { AIAnalysis } from "@/components/AIAnalysis";
 import type { TrustTier, DetectedFlag } from "@/types";
+import type { AIAnalysisResult } from "@/lib/ai-analysis";
 
 // ─── Tier display config ───────────────────────────────────────────────────────
 
@@ -86,6 +88,10 @@ export default async function ResultsPage({
 
   const tier = analysis.trustTier as TrustTier;
   const tierCfg = TIER_CONFIG[tier];
+
+  const aiAnalysis: AIAnalysisResult | null = analysis.aiAnalysis
+    ? JSON.parse(analysis.aiAnalysis as string) as AIAnalysisResult
+    : null;
 
   const flags: DetectedFlag[] = analysis.riskFlags.map((f) => ({
     flagType: f.flagType as DetectedFlag["flagType"],
@@ -248,6 +254,14 @@ export default async function ResultsPage({
               )
             }
           />
+
+          {/* AI Analysis */}
+          {aiAnalysis && (
+            <AIAnalysis
+              analysis={aiAnalysis}
+              ruleScore={Math.round((analysis.trustScore - aiAnalysis.aiScore * 0.6) / 0.4)}
+            />
+          )}
 
           {/* Actions */}
           <div className="flex flex-wrap gap-3">

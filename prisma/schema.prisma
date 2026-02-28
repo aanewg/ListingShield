@@ -24,8 +24,9 @@ model ListingAnalysis {
   sellerAvgRating   Float?
   sellerIsVerified  Boolean    @default(false)
   imageUrls         String?    // JSON-encoded string[]
-  trustScore        Int        // 0-100
+  trustScore        Int        // 0-100 (blended rule + AI score)
   trustTier         String     // "highly_trusted" | "looks_good" | "caution" | "risky" | "likely_scam"
+  aiAnalysis        String?    // JSON: { aiScore, summary, recommendation, scamType, additionalFlags }
   riskFlags         RiskFlag[]
   createdAt         DateTime   @default(now())
 }
