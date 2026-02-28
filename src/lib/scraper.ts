@@ -49,7 +49,8 @@ function getMeta(html: string, key: string): string | null {
 
 function getJsonLd(html: string): unknown[] {
   const results: unknown[] = [];
-  const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  // Allow unquoted type attribute (e.g. eBay uses type=application/ld+json without quotes)
+  const re = /<script[^>]*\btype=["']?application\/ld\+json["']?[^>]*>([\s\S]*?)<\/script>/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     try {
@@ -267,19 +268,24 @@ function extractEbayData(html: string): Partial<ScrapedListing> {
     html.match(/content=["']([\d.]+)["'][^>]+itemprop=["']price["']/i)?.[1];
   if (priceContent) data.price = parseFloat(priceContent);
 
-  // Seller username — from /usr/USERNAME in the page
-  const usrLink = html.match(/\/usr\/([^"'?/#\s]{2,50})/)?.[1];
-  if (usrLink) data.sellerUsername = decodeEntities(usrLink);
+  // Seller username — eBay's new markup embeds "username":"seller_name" in the page JSON
+  const usernameJson = html.match(/"username"\s*:\s*"([^"]{2,50})"/)?.[1];
+  if (usernameJson) data.sellerUsername = usernameJson;
+  // Fallback: old /usr/USERNAME link pattern
+  if (!data.sellerUsername) {
+    const usrLink = html.match(/\/usr\/([^"'?/#\s]{2,50})/)?.[1];
+    if (usrLink) data.sellerUsername = decodeEntities(usrLink);
+  }
 
-  // Feedback / review count
-  // eBay embeds: "feedbackCount":1234, "positiveCount":1234, or text "1,234 feedback"
+  // Feedback / review count — eBay embeds in page JSON
   const fbRaw =
-    html.match(/"(?:feedbackCount|positiveCount|feedback_count)"\s*:\s*(\d+)/)?.[1] ??
+    html.match(/"(?:feedbackCount|positiveCount|feedback_count|feedbackScore)"\s*:\s*(\d+)/)?.[1] ??
     html.match(/(\d[\d,]*)\s+(?:feedback|ratings?)\b/i)?.[1]?.replace(/,/g, "");
   if (fbRaw) data.sellerReviewCount = parseInt(fbRaw, 10);
 
   // Rating: eBay uses positive-feedback %; convert to 5-star equivalent
-  const posPct = html.match(/"positivePercentage"\s*:\s*([\d.]+)/)?.[1];
+  const posPct = html.match(/"positivePercentage"\s*:\s*([\d.]+)/)?.[1]
+    ?? html.match(/"feedbackPercentage"\s*:\s*"([\d.]+)%?"/)?.[1];
   if (posPct) {
     data.sellerAvgRating = Math.round((parseFloat(posPct) / 100) * 5 * 10) / 10;
   }
