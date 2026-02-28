@@ -281,18 +281,18 @@ function extractMercariData(html: string): Partial<ScrapedListing> {
 
   // __NEXT_DATA__ — most reliable source for seller profile
   const nd = getNextData(html);
-  const item =
-    (nd?.props as Record<string, unknown> | undefined)?.pageProps?.item ??
-    ((nd?.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined)?.data?.item as Record<string, unknown> | undefined;
+  const ndPP = (nd?.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined;
+  const ndData = ndPP?.data as Record<string, unknown> | undefined;
+  const item = (ndPP?.item ?? ndData?.item) as Record<string, unknown> | undefined;
   if (item) {
-    if (!data.price && (item as Record<string, unknown>).price) data.price = parseInt(String((item as Record<string, unknown>).price), 10);
-    const s = (item as Record<string, unknown>).seller as Record<string, unknown> | undefined;
+    if (!data.price && item.price) data.price = parseInt(String(item.price), 10);
+    const s = item.seller as Record<string, unknown> | undefined;
     if (s) {
-      if (s.name)                   data.sellerUsername    = String(s.name);
+      if (s.name)        data.sellerUsername    = String(s.name);
       const rating = s.rating as Record<string, unknown> | undefined;
-      if (rating?.count)            data.sellerReviewCount = Number(rating.count);
-      if (rating?.average)          data.sellerAvgRating   = parseFloat(String(rating.average));
-      if (s.is_verified)            data.sellerIsVerified  = true;
+      if (rating?.count)   data.sellerReviewCount = Number(rating.count);
+      if (rating?.average) data.sellerAvgRating   = parseFloat(String(rating.average));
+      if (s.is_verified)   data.sellerIsVerified  = true;
     }
   }
 
