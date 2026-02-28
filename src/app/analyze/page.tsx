@@ -1,5 +1,6 @@
 import { AnalyzeForm } from "@/components/AnalyzeForm";
 import type { Platform } from "@/types";
+import Link from "next/link";
 
 export const metadata = {
   title: "Analyze a Listing — ListingShield",
@@ -16,6 +17,17 @@ export default async function AnalyzePage({
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
+      {/* Back link */}
+      <Link
+        href="/"
+        className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors mono mb-6"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3 w-3">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+        </svg>
+        Back to Home
+      </Link>
+
       {/* Header */}
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-bold text-white mb-2">Analyze a Listing</h1>

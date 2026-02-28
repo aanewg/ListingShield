@@ -1,6 +1,23 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export function Navbar() {
+  const pathname = usePathname();
+
+  // "/" and "/analyze" both count as the "Analyze" section
+  const isAnalyze   = pathname === "/" || pathname === "/analyze";
+  const isReports   = pathname.startsWith("/reports") || pathname === "/report";
+  const isDashboard = pathname === "/dashboard";
+  const isResults   = pathname.startsWith("/results");
+
+  function navCls(active: boolean) {
+    return active
+      ? "text-white"
+      : "text-slate-400 hover:text-white transition-colors";
+  }
+
   return (
     <nav className="sticky top-0 z-50 border-b border-[#1e2a3f] bg-[#06080d]/90 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
@@ -17,14 +34,14 @@ export function Navbar() {
         </Link>
 
         {/* Nav links */}
-        <div className="flex items-center gap-6 text-sm text-slate-400">
-          <Link href="/" className="hover:text-white transition-colors">
+        <div className="flex items-center gap-6 text-sm">
+          <Link href="/" className={navCls(isAnalyze && !isResults)}>
             Analyze
           </Link>
-          <Link href="/reports" className="hover:text-white transition-colors">
+          <Link href="/reports" className={navCls(isReports)}>
             Reports
           </Link>
-          <Link href="/dashboard" className="hover:text-white transition-colors">
+          <Link href="/dashboard" className={navCls(isDashboard)}>
             Dashboard
           </Link>
           <Link
