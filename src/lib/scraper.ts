@@ -86,32 +86,71 @@ export function priceFromText(text: string): number | null {
 }
 
 // ─── Facebook Marketplace ─────────────────────────────────────────────────────
-// Facebook serves og: preview tags for public listings even without login.
-// We try several user-agents; social-crawler UAs often get richer head content.
+// Facebook embeds listing data in JSON blobs inside the page.
+// We try multiple UAs and extract price from og: tags AND embedded JSON data.
+
+function extractFbPrice(html: string, ogTitle: string | null, ogDesc: string | null): number | null {
+  // 1. og:description — Facebook often puts "$50 · Condition: Used" here
+  if (ogDesc) { const p = priceFromText(ogDesc); if (p) return p; }
+
+  // 2. og:title cleaned — sometimes "Item – $50 | Facebook Marketplace"
+  if (ogTitle) { const p = priceFromText(ogTitle); if (p) return p; }
+
+  // 3. "listing_price":{"amount":"50","currency":"USD"}  (most reliable)
+  const lp = html.match(/"listing_price"\s*[:{][^}]{0,200}"amount"\s*:\s*"?([\d.]+)"?/);
+  if (lp) { const v = parseFloat(lp[1]); if (v > 0) return v; }
+
+  // 4. "price":{"amount":"50.00",...}
+  const pa = html.match(/"price"\s*:\s*\{\s*"amount"\s*:\s*"?([\d.]+)"?/);
+  if (pa) { const v = parseFloat(pa[1]); if (v > 0) return v; }
+
+  // 5. "price":"50" or "price":50  (simple scalar)
+  const ps = html.match(/"price"\s*:\s*"?([\d.]+)"?(?!\s*:)/);
+  if (ps) { const v = parseFloat(ps[1]); if (v > 0 && v < 1_000_000) return v; }
+
+  // 6. <script type="application/json"> data islands (Relay store)
+  for (const m of html.matchAll(/<script[^>]+type="application\/json"[^>]*>([\s\S]*?)<\/script>/gi)) {
+    const am = m[1].match(/"amount"\s*:\s*"?([\d.]+)"?/);
+    if (am) { const v = parseFloat(am[1]); if (v > 0) return v; }
+  }
+
+  // 7. Any inline script that mentions price + amount
+  for (const m of html.matchAll(/<script[^>]*>([\s\S]{0,8000}?)<\/script>/gi)) {
+    const s = m[1];
+    if (!s.includes('"price"') && !s.includes("listing_price")) continue;
+    const am = s.match(/"amount"\s*:\s*"?([\d.]+)"?/);
+    if (am) { const v = parseFloat(am[1]); if (v > 0 && v < 1_000_000) return v; }
+  }
+
+  // 8. Full stripped-text scan (extended depth)
+  return priceFromText(html.replace(/<[^>]+>/g, " ").slice(0, 20_000));
+}
 
 async function scrapeFacebook(url: string): Promise<ScrapedListing | null> {
   const attempts = [
-    // Social bots — Facebook serves og: preview data to these
+    // Facebook's own external-hit crawler — highest chance of getting full og: data
+    "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+    // Social bots
     "Twitterbot/1.0",
     "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)",
-    // Mobile Safari — lighter Facebook shell, sometimes exposes more
+    // Mobile — lighter shell, less JS gating
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-    // Desktop
+    // Desktop Chrome
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
   ];
 
-  // Also try the mbasic (no-JS) Facebook URL
   const urlVariants = [
     url,
-    url.replace("www.facebook.com", "mbasic.facebook.com"),
+    url.replace("www.facebook.com", "mbasic.facebook.com"),  // no-JS lightweight version
     url.replace("www.facebook.com", "m.facebook.com"),
+    url.replace("www.facebook.com", "lm.facebook.com"),       // Facebook Lite
   ];
 
   for (const variant of urlVariants) {
     for (const ua of attempts) {
       try {
         const controller = new AbortController();
-        const timeout    = setTimeout(() => controller.abort(), 7000);
+        const timeout    = setTimeout(() => controller.abort(), 8000);
         const res = await fetch(variant, {
           headers: {
             "User-Agent":      ua,
@@ -131,7 +170,7 @@ async function scrapeFacebook(url: string): Promise<ScrapedListing | null> {
         const ogDesc  = getMeta(html, "og:description");
         const ogImage = getMeta(html, "og:image");
 
-        // Reject login/error pages
+        // Reject login / error pages
         const isLoginPage =
           !ogTitle ||
           /^(facebook|log in|sign up|create new account)$/i.test(ogTitle.trim()) ||
@@ -139,22 +178,25 @@ async function scrapeFacebook(url: string): Promise<ScrapedListing | null> {
 
         if (isLoginPage) continue;
 
-        // Try to extract price from title, description, or page text
-        const price =
-          priceFromText(ogTitle ?? "") ??
-          (ogDesc ? priceFromText(ogDesc) : null) ??
-          priceFromText(html.replace(/<[^>]+>/g, " ").slice(0, 5000));
-
-        // Clean title — Facebook sometimes appends " | Facebook" or " - Facebook Marketplace"
+        // Clean title — strip " | Facebook Marketplace" suffix etc.
         const cleanedTitle = (ogTitle ?? "")
           .replace(/\s*[|–-]\s*Facebook.*$/i, "")
           .trim();
 
         if (!cleanedTitle) continue;
 
+        const price = extractFbPrice(html, cleanedTitle, ogDesc ?? null);
+
+        // Try to pull a richer description from embedded JSON
+        let description = ogDesc?.replace(/\s*[|–-]\s*Facebook.*$/i, "").trim() ?? "";
+        if (!description || description.length < 20) {
+          const dm = html.match(/"listing_description"\s*:\s*"([^"]{10,})"/);
+          if (dm) description = decodeEntities(dm[1].replace(/\\n/g, " ").replace(/\\"/g, '"'));
+        }
+
         return {
           title:       cleanedTitle,
-          description: ogDesc?.replace(/\s*[|–-]\s*Facebook.*$/i, "").trim() ?? "Facebook Marketplace listing.",
+          description: description || "Facebook Marketplace listing.",
           price,
           imageUrls:   ogImage ? [ogImage] : [],
           partial:     price === null,
