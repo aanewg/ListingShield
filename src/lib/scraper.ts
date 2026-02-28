@@ -138,7 +138,12 @@ function extractDepopData(html: string): Partial<ScrapedListing> {
 
 // ─── Main scrape function ─────────────────────────────────────────────────────
 
+// Platforms that require a login session — scraping will never work
+const UNSCRAPPABLE = ["facebook.com/marketplace", "facebook.com/groups"];
+
 export async function scrapeListing(url: string): Promise<ScrapedListing | null> {
+  if (UNSCRAPPABLE.some((pattern) => url.includes(pattern))) return null;
+
   let html: string;
 
   try {

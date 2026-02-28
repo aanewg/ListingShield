@@ -24,10 +24,14 @@ export async function POST(req: NextRequest) {
 
     // ── Auto-scrape when only a URL is provided ─────────────────────────────
     if (listingUrl && !title) {
+      const isFacebook = listingUrl.includes("facebook.com");
       const scraped = await scrapeListing(listingUrl);
       if (!scraped) {
+        const message = isFacebook
+          ? "Facebook Marketplace requires a login to read listings. Please fill in the details manually below."
+          : "Could not automatically read this listing. Please fill in the details manually.";
         return NextResponse.json(
-          { error: "SCRAPE_FAILED", message: "Could not read this listing automatically. Please fill in the details manually." },
+          { error: "SCRAPE_FAILED", message },
           { status: 422 }
         );
       }
