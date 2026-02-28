@@ -39,10 +39,14 @@ export async function POST(req: NextRequest) {
       // Partial scrape — got some data but price is missing; send it back so
       // the form can pre-fill and ask the user only for what's missing.
       if (scraped.partial || !scraped.price) {
+        const isFacebook = listingUrl?.includes("facebook.com");
+        const partialMsg = isFacebook
+          ? "Facebook Marketplace hides prices until you're logged in — we can't read it automatically. The form is pre-filled with what we found. Add the price and any missing details, then hit Run Analysis."
+          : "We found the listing but couldn't read the price. The form below is pre-filled — just add the price and hit Run Analysis.";
         return NextResponse.json(
           {
             error:   "SCRAPE_PARTIAL",
-            message: "We found the listing but couldn't read the price. The form below is pre-filled — just add the price and hit Run Analysis.",
+            message: partialMsg,
             partial: {
               title:             scraped.title,
               description:       scraped.description,

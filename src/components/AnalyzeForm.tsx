@@ -104,8 +104,8 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
 
         // Partial scrape — pre-fill whatever we got, show form for missing fields
         if (data.error === "SCRAPE_PARTIAL" && data.partial) {
-          if (data.partial.title)              setTitle(data.partial.title);
-          if (data.partial.description)        setDescription(data.partial.description);
+          if (data.partial.title?.trim())      setTitle(data.partial.title);
+          if (data.partial.description?.trim()) setDescription(data.partial.description);
           if (data.partial.imageUrls?.length)  setImageUrls(data.partial.imageUrls.join(", "));
           if (data.partial.sellerUsername)     setSellerUser(data.partial.sellerUsername);
           if (data.partial.sellerReviewCount != null) setReviewCount(String(data.partial.sellerReviewCount));

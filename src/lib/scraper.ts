@@ -32,13 +32,17 @@ function decodeEntities(str: string): string {
 
 function getMeta(html: string, key: string): string | null {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Use [\s\S]*? so content values with literal newlines are captured correctly
   const patterns = [
-    new RegExp(`<meta[^>]+(?:property|name|itemprop)=["']${escaped}["'][^>]+content=["']([^"'<>]+)["']`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"'<>]+)["'][^>]+(?:property|name|itemprop)=["']${escaped}["']`, "i"),
+    new RegExp(`<meta[^>]+(?:property|name|itemprop)=["']${escaped}["'][^>]+content=["']((?:[^"'<>]|&#[0-9]+;)*?)["']`, "i"),
+    new RegExp(`<meta[^>]+content=["']((?:[^"'<>]|&#[0-9]+;)*?)["'][^>]+(?:property|name|itemprop)=["']${escaped}["']`, "i"),
+    // Fallback: allow newlines inside content value (FB multiline og:description)
+    new RegExp(`<meta[^>]*(?:property|name|itemprop)=["']${escaped}["'][^>]*content=["']([\\s\\S]*?)["'][^>]*/?>`, "i"),
+    new RegExp(`<meta[^>]*content=["']([\\s\\S]*?)["'][^>]*(?:property|name|itemprop)=["']${escaped}["'][^>]*/?>`, "i"),
   ];
   for (const p of patterns) {
     const m = html.match(p);
-    if (m?.[1]) return decodeEntities(m[1].trim());
+    if (m?.[1]?.trim()) return decodeEntities(m[1].trim());
   }
   return null;
 }
@@ -90,77 +94,68 @@ export function priceFromText(text: string): number | null {
 }
 
 // ─── Facebook Marketplace ─────────────────────────────────────────────────────
-// Facebook embeds listing data in JSON blobs inside the page.
-// We try multiple UAs and extract price from og: tags AND embedded JSON data.
+// Facebook requires login to render price — it is never present in the HTML.
+// We get title + description + image from og: tags, then return partial=true
+// so the user only has to enter the price manually.
+// We NEVER return null for a valid FB Marketplace URL — always return partial.
 
 function extractFbPrice(html: string, ogTitle: string | null, ogDesc: string | null): number | null {
-  // 1. og:description — Facebook often puts "$50 · Condition: Used" here
+  // 1. og:description — FB sometimes puts "$50 · Condition: Used" here
   if (ogDesc) { const p = priceFromText(ogDesc); if (p) return p; }
-
-  // 2. og:title cleaned — sometimes "Item – $50 | Facebook Marketplace"
+  // 2. og:title — sometimes "Item – $50 | Facebook Marketplace"
   if (ogTitle) { const p = priceFromText(ogTitle); if (p) return p; }
-
-  // 3. "listing_price":{"amount":"50","currency":"USD"}  (most reliable)
+  // 3. "listing_price":{"amount":"50","currency":"USD"}
   const lp = html.match(/"listing_price"\s*[:{][^}]{0,200}"amount"\s*:\s*"?([\d.]+)"?/);
   if (lp) { const v = parseFloat(lp[1]); if (v > 0) return v; }
-
   // 4. "price":{"amount":"50.00",...}
   const pa = html.match(/"price"\s*:\s*\{\s*"amount"\s*:\s*"?([\d.]+)"?/);
   if (pa) { const v = parseFloat(pa[1]); if (v > 0) return v; }
-
-  // 5. "price":"50" or "price":50  (simple scalar)
-  const ps = html.match(/"price"\s*:\s*"?([\d.]+)"?(?!\s*:)/);
-  if (ps) { const v = parseFloat(ps[1]); if (v > 0 && v < 1_000_000) return v; }
-
-  // 6. <script type="application/json"> data islands (Relay store)
+  // 5. application/json data islands (Relay store)
   for (const m of html.matchAll(/<script[^>]+type="application\/json"[^>]*>([\s\S]*?)<\/script>/gi)) {
     const am = m[1].match(/"amount"\s*:\s*"?([\d.]+)"?/);
     if (am) { const v = parseFloat(am[1]); if (v > 0) return v; }
   }
-
-  // 7. Any inline script that mentions price + amount
-  for (const m of html.matchAll(/<script[^>]*>([\s\S]{0,8000}?)<\/script>/gi)) {
-    const s = m[1];
-    if (!s.includes('"price"') && !s.includes("listing_price")) continue;
-    const am = s.match(/"amount"\s*:\s*"?([\d.]+)"?/);
-    if (am) { const v = parseFloat(am[1]); if (v > 0 && v < 1_000_000) return v; }
-  }
-
-  // 8. Full stripped-text scan (extended depth)
+  // 6. Full stripped-text scan
   return priceFromText(html.replace(/<[^>]+>/g, " ").slice(0, 20_000));
 }
 
 async function scrapeFacebook(url: string): Promise<ScrapedListing | null> {
+  // Strip tracking query params — they can cause redirects/blocks
+  const cleanUrl = (() => {
+    const base = url.split("?")[0].replace(/\/$/, "") + "/";
+    // Ensure it's the canonical www URL
+    return base.replace(/^https?:\/\/(m|lm|mbasic|web)\.facebook\.com/, "https://www.facebook.com");
+  })();
+
+  const itemId = cleanUrl.match(/marketplace\/item\/(\d+)/)?.[1];
+
   const attempts = [
-    // Facebook's own external-hit crawler — highest chance of getting full og: data
     "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
-    // Social bots
     "Twitterbot/1.0",
     "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)",
-    // Mobile — lighter shell, less JS gating
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-    // Desktop Chrome
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
   ];
 
   const urlVariants = [
-    url,
-    url.replace("www.facebook.com", "mbasic.facebook.com"),  // no-JS lightweight version
-    url.replace("www.facebook.com", "m.facebook.com"),
-    url.replace("www.facebook.com", "lm.facebook.com"),       // Facebook Lite
+    cleanUrl,
+    cleanUrl + "?_fb_noscript=1",  // forces no-JS server render
+    cleanUrl.replace("www.facebook.com", "mbasic.facebook.com"),
+    cleanUrl.replace("www.facebook.com", "m.facebook.com"),
   ];
 
   for (const variant of urlVariants) {
     for (const ua of attempts) {
       try {
         const controller = new AbortController();
-        const timeout    = setTimeout(() => controller.abort(), 8000);
+        const timeout = setTimeout(() => controller.abort(), 8000);
         const res = await fetch(variant, {
           headers: {
-            "User-Agent":      ua,
-            "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Cache-Control":   "no-cache",
+            "User-Agent":       ua,
+            "Accept":           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language":  "en-US,en;q=0.9",
+            "Accept-Encoding":  "identity",  // avoid gzip so text() works cleanly
+            "Cache-Control":    "no-cache",
           },
           redirect: "follow",
           signal: controller.signal,
@@ -175,45 +170,61 @@ async function scrapeFacebook(url: string): Promise<ScrapedListing | null> {
         const ogImage = getMeta(html, "og:image");
 
         // Reject login / error pages
-        const isLoginPage =
+        if (
           !ogTitle ||
           /^(facebook|log in|sign up|create new account)$/i.test(ogTitle.trim()) ||
-          /log in|sign up|create an account/i.test(ogTitle);
+          /log in|sign up|create an account/i.test(ogTitle)
+        ) continue;
 
-        if (isLoginPage) continue;
-
-        // Clean title — strip " | Facebook Marketplace" suffix etc.
-        const cleanedTitle = (ogTitle ?? "")
-          .replace(/\s*[|–-]\s*Facebook.*$/i, "")
+        // Clean title — strip " | Facebook Marketplace" suffix
+        const cleanedTitle = ogTitle
+          .replace(/\s*[|–—-]\s*Facebook.*$/i, "")
           .trim();
 
         if (!cleanedTitle) continue;
 
+        // Price — almost never available without login, but try
         const price = extractFbPrice(html, cleanedTitle, ogDesc ?? null);
 
-        // Try to pull a richer description from embedded JSON
-        let description = ogDesc?.replace(/\s*[|–-]\s*Facebook.*$/i, "").trim() ?? "";
-        if (!description || description.length < 20) {
+        // Description — og:description has the listing text (no price usually)
+        let description = (ogDesc ?? "")
+          .replace(/\s*[|–—-]\s*Facebook.*$/i, "")
+          .trim();
+
+        // Richer description from embedded JSON if og:desc is very short
+        if (description.length < 20) {
           const dm = html.match(/"listing_description"\s*:\s*"([^"]{10,})"/);
-          if (dm) description = decodeEntities(dm[1].replace(/\\n/g, " ").replace(/\\"/g, '"'));
+          if (dm) description = decodeEntities(dm[1].replace(/\\n/g, "\n").replace(/\\"/g, '"'));
         }
 
-        // Seller name from embedded JSON
+        // Seller name from embedded JSON (rarely available without login)
         const sellerName =
           html.match(/"seller_name"\s*:\s*"([^"]{2,60})"/)?.[1] ??
-          html.match(/"__typename"\s*:\s*"User"[^}]{0,150}"name"\s*:\s*"([^"]{2,60})"/)?.[1] ??
-          html.match(/"marketplace_listing_seller"[^}]{0,200}"name"\s*:\s*"([^"]{2,60})"/)?.[1];
+          html.match(/"marketplace_listing_seller"[^}]{0,300}"name"\s*:\s*"([^"]{2,60})"/)?.[1];
 
         return {
-          title:           cleanedTitle,
-          description:     description || "Facebook Marketplace listing.",
+          title:          cleanedTitle,
+          description:    description || "Facebook Marketplace listing.",
           price,
-          imageUrls:       ogImage ? [ogImage] : [],
-          sellerUsername:  sellerName ?? undefined,
-          partial:         price === null,
+          imageUrls:      ogImage ? [ogImage] : [],
+          sellerUsername: sellerName,
+          partial:        true,  // always partial — FB never exposes price without login
         };
       } catch { continue; }
     }
+  }
+
+  // All fetch attempts failed (Vercel IP blocked, etc.)
+  // Return a skeleton so the form pre-fills with the URL and platform
+  // and the user just needs to fill in the listing details manually.
+  if (itemId) {
+    return {
+      title:       "",
+      description: "",
+      price:       null,
+      imageUrls:   [],
+      partial:     true,
+    };
   }
 
   return null;
