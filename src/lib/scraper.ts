@@ -14,7 +14,19 @@ export interface ScrapedListing {
   sellerAvgRating?:   number;          // 0–5 scale
   sellerIsVerified?:  boolean;
   category?:          string;
+  platform?:          string;          // auto-detected platform
   partial?:           boolean;         // true when some fields are missing
+}
+
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+
+function daysAgo(dateStr: string): number | null {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    const days = Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+    return days >= 0 ? days : null;
+  } catch { return null; }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -277,6 +289,16 @@ function extractEbayData(html: string): Partial<ScrapedListing> {
     if (usrLink) data.sellerUsername = decodeEntities(usrLink);
   }
 
+  // Account age — eBay embeds memberSince in page JSON
+  const memberSince =
+    html.match(/"memberSince"\s*:\s*"([^"]{8,30})"/)?.[1] ??
+    html.match(/"member_since"\s*:\s*"([^"]{8,30})"/)?.[1] ??
+    html.match(/Member since (\w+ \d{4})/i)?.[1];
+  if (memberSince) {
+    const days = daysAgo(memberSince);
+    if (days !== null && days >= 0) data.sellerAccountAge = days;
+  }
+
   // Feedback / review count — eBay embeds in page JSON
   const fbRaw =
     html.match(/"(?:feedbackCount|positiveCount|feedback_count|feedbackScore)"\s*:\s*(\d+)/)?.[1] ??
@@ -329,6 +351,12 @@ function extractMercariData(html: string): Partial<ScrapedListing> {
       if (rating?.count)   data.sellerReviewCount = Number(rating.count);
       if (rating?.average) data.sellerAvgRating   = parseFloat(String(rating.average));
       if (s.is_verified)   data.sellerIsVerified  = true;
+      // Account age from created / registration timestamps
+      const created = (s.created ?? s.registration_date ?? s.created_at) as string | undefined;
+      if (created) {
+        const days = daysAgo(String(created));
+        if (days !== null) data.sellerAccountAge = days;
+      }
     }
   }
 
@@ -368,10 +396,16 @@ function extractPoshmarkData(html: string): Partial<ScrapedListing> {
   const s = (listing as Record<string, unknown> | undefined)?.seller ??
             (listing as Record<string, unknown> | undefined)?.creator as Record<string, unknown> | undefined;
   if (s) {
-    if ((s as Record<string, unknown>).handle)            data.sellerUsername    = String((s as Record<string, unknown>).handle);
-    if ((s as Record<string, unknown>).avg_rating)        data.sellerAvgRating   = parseFloat(String((s as Record<string, unknown>).avg_rating));
-    if ((s as Record<string, unknown>).rating_count)      data.sellerReviewCount = parseInt(String((s as Record<string, unknown>).rating_count), 10);
-    if ((s as Record<string, unknown>).identity_verified) data.sellerIsVerified  = true;
+    const ps = s as Record<string, unknown>;
+    if (ps.handle)            data.sellerUsername    = String(ps.handle);
+    if (ps.avg_rating)        data.sellerAvgRating   = parseFloat(String(ps.avg_rating));
+    if (ps.rating_count)      data.sellerReviewCount = parseInt(String(ps.rating_count), 10);
+    if (ps.identity_verified) data.sellerIsVerified  = true;
+    const joined = (ps.list_item_party_started ?? ps.joined_at ?? ps.member_since ?? ps.created_at) as string | undefined;
+    if (joined) {
+      const days = daysAgo(String(joined));
+      if (days !== null) data.sellerAccountAge = days;
+    }
   }
 
   // Fallback patterns
@@ -400,14 +434,19 @@ function extractDepopData(html: string): Partial<ScrapedListing> {
   const pp = (nd?.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined;
   const product = pp?.product ?? pp?.data as Record<string, unknown> | undefined;
   if (product) {
-    if (!data.price && (product as Record<string, unknown>).price)
-      data.price = parseFloat(String((product as Record<string, unknown>).price));
-    const s = (product as Record<string, unknown>).seller as Record<string, unknown> | undefined;
+    const dp = product as Record<string, unknown>;
+    if (!data.price && dp.price) data.price = parseFloat(String(dp.price));
+    const s = dp.seller as Record<string, unknown> | undefined;
     if (s) {
       if (s.username)       data.sellerUsername    = String(s.username);
       if (s.reviewsTotal)   data.sellerReviewCount = parseInt(String(s.reviewsTotal), 10);
       if (s.reviewsAverage) data.sellerAvgRating   = parseFloat(String(s.reviewsAverage));
       if (s.verified)       data.sellerIsVerified  = true;
+      const created = (s.created ?? s.created_at ?? s.joined_at) as string | undefined;
+      if (created) {
+        const days = daysAgo(String(created));
+        if (days !== null) data.sellerAccountAge = days;
+      }
     }
   }
 
@@ -429,11 +468,27 @@ function extractDepopData(html: string): Partial<ScrapedListing> {
   return data;
 }
 
+// ─── Platform detection ───────────────────────────────────────────────────────
+
+export function detectPlatform(url: string): string {
+  if (url.includes("ebay.com"))      return "ebay";
+  if (url.includes("mercari.com"))   return "mercari";
+  if (url.includes("facebook.com"))  return "facebook";
+  if (url.includes("poshmark.com"))  return "poshmark";
+  if (url.includes("depop.com"))     return "depop";
+  return "manual";
+}
+
 // ─── Main scrape function ─────────────────────────────────────────────────────
 
 export async function scrapeListing(url: string): Promise<ScrapedListing | null> {
+  const platform = detectPlatform(url);
+
   // Facebook needs its own flow
-  if (url.includes("facebook.com")) return scrapeFacebook(url);
+  if (url.includes("facebook.com")) {
+    const result = await scrapeFacebook(url);
+    return result ? { ...result, platform } : null;
+  }
 
   let html: string;
   try {
@@ -515,16 +570,21 @@ export async function scrapeListing(url: string): Promise<ScrapedListing | null>
 
   if (!title) return null;
 
+  // Merge account age from platform-specific data
+  const sellerAccountAge = pd.sellerAccountAge;
+
   return {
     title:            title.trim(),
     description:      (description ?? "").trim() || "No description available.",
     price:            price && price > 0 ? price : null,
     imageUrls:        [...new Set(imageUrls)].slice(0, 5),
     sellerUsername,
+    sellerAccountAge,
     sellerReviewCount,
     sellerAvgRating,
     sellerIsVerified,
     category,
+    platform,
     partial:          !price || price <= 0,
   };
 }

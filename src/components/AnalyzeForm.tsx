@@ -4,6 +4,16 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AnalysisLoader } from "./AnalysisLoader";
 import type { Platform, Category } from "@/types";
+import type { ScrapedListing } from "@/lib/scraper";
+
+function detectPlatform(url: string): Platform {
+  if (url.includes("ebay.com"))     return "ebay";
+  if (url.includes("mercari.com"))  return "mercari";
+  if (url.includes("facebook.com")) return "facebook";
+  if (url.includes("poshmark.com")) return "poshmark";
+  if (url.includes("depop.com"))    return "depop";
+  return "manual";
+}
 
 const PLATFORMS: { id: Platform; label: string }[] = [
   { id: "mercari",  label: "Mercari"          },
@@ -19,9 +29,23 @@ const CATEGORIES: Category[] = [
   "Beauty", "Home", "Toys", "Collectibles", "Other",
 ];
 
+interface InitialData {
+  title?:             string;
+  description?:       string;
+  price?:             number;
+  category?:          Category;
+  imageUrls?:         string[];
+  sellerUsername?:    string;
+  sellerAccountAge?:  number;
+  sellerReviewCount?: number;
+  sellerAvgRating?:   number;
+  sellerIsVerified?:  boolean;
+}
+
 interface Props {
   initialUrl?:      string;
   initialPlatform?: Platform;
+  initialData?:     InitialData;
 }
 
 // ─── Form field helper components ─────────────────────────────────────────────
@@ -64,28 +88,29 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
 
 // ─── Main form ────────────────────────────────────────────────────────────────
 
-export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
+export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: Props) {
   const router = useRouter();
 
   // ── UI state ─────────────────────────────────────────────────────────────
   const [isLoading,       setIsLoading]       = useState(false);
   const [error,           setError]           = useState<string | null>(null);
-  const [showManual,      setShowManual]      = useState(!initialUrl);
+  const [showManual,      setShowManual]      = useState(!initialUrl || !!initialData);
   const [screenshotState, setScreenshotState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [fetchState,      setFetchState]      = useState<"idle" | "loading" | "done" | "error">(initialData ? "done" : "idle");
 
-  // ── Form state ────────────────────────────────────────────────────────────
+  // ── Form state — seeded from initialData when provided (extension import) ─
   const [platform,    setPlatform]    = useState<Platform>(initialPlatform ?? "manual");
-  const [title,       setTitle]       = useState("");
-  const [description, setDescription] = useState("");
-  const [price,       setPrice]       = useState("");
-  const [category,    setCategory]    = useState<Category | "">("");
+  const [title,       setTitle]       = useState(initialData?.title       ?? "");
+  const [description, setDescription] = useState(initialData?.description ?? "");
+  const [price,       setPrice]       = useState(initialData?.price != null ? String(initialData.price) : "");
+  const [category,    setCategory]    = useState<Category | "">(initialData?.category ?? "");
   const [listingUrl,  setListingUrl]  = useState(initialUrl);
-  const [sellerUser,  setSellerUser]  = useState("");
-  const [accountAge,  setAccountAge]  = useState("");
-  const [reviewCount, setReviewCount] = useState("");
-  const [avgRating,   setAvgRating]   = useState("");
-  const [isVerified,  setIsVerified]  = useState(false);
-  const [imageUrls,   setImageUrls]   = useState("");
+  const [sellerUser,  setSellerUser]  = useState(initialData?.sellerUsername    ?? "");
+  const [accountAge,  setAccountAge]  = useState(initialData?.sellerAccountAge  != null ? String(initialData.sellerAccountAge)  : "");
+  const [reviewCount, setReviewCount] = useState(initialData?.sellerReviewCount != null ? String(initialData.sellerReviewCount) : "");
+  const [avgRating,   setAvgRating]   = useState(initialData?.sellerAvgRating   != null ? String(initialData.sellerAvgRating)   : "");
+  const [isVerified,  setIsVerified]  = useState(initialData?.sellerIsVerified  ?? false);
+  const [imageUrls,   setImageUrls]   = useState(initialData?.imageUrls?.join(", ") ?? "");
 
   // ── Effects ───────────────────────────────────────────────────────────────
   // If a URL was provided (came from the home page input), auto-submit immediately
@@ -196,6 +221,55 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
     }
   }
 
+  // ── Fetch Details (fills form without running analysis) ───────────────────
+  async function handleFetchDetails() {
+    const url = listingUrl.trim();
+    if (!url) return;
+
+    setFetchState("loading");
+    setError(null);
+
+    try {
+      const res  = await fetch("/api/scrape", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ url }),
+      });
+      const data = await res.json() as ScrapedListing & { error?: string; message?: string };
+
+      if (!res.ok) {
+        setError(data.message ?? "Could not read this listing automatically. Fill in the details manually.");
+        setFetchState("error");
+        setShowManual(true);
+        return;
+      }
+
+      // Populate every field we got back
+      if (data.platform)            setPlatform(data.platform as Platform);
+      if (data.title?.trim())        setTitle(data.title.trim());
+      if (data.description?.trim())  setDescription(data.description.trim());
+      if (data.price != null)        setPrice(String(data.price));
+      if (data.category)             setCategory(data.category as Category);
+      if (data.imageUrls?.length)    setImageUrls(data.imageUrls.join(", "));
+      if (data.sellerUsername)       setSellerUser(data.sellerUsername);
+      if (data.sellerAccountAge != null) setAccountAge(String(data.sellerAccountAge));
+      if (data.sellerReviewCount != null) setReviewCount(String(data.sellerReviewCount));
+      if (data.sellerAvgRating   != null) setAvgRating(String(data.sellerAvgRating));
+      if (data.sellerIsVerified)     setIsVerified(true);
+
+      setFetchState("done");
+      setShowManual(true);
+
+      if (data.partial) {
+        setError("We found the listing but couldn't read the price. Fill in any missing fields and click Run Analysis.");
+      }
+    } catch {
+      setError("Something went wrong fetching the listing. Fill in the details manually.");
+      setFetchState("error");
+      setShowManual(true);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -282,16 +356,24 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform }: Props) {
             <Input
               type="url"
               value={listingUrl}
-              onChange={(e) => setListingUrl(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setListingUrl(val);
+                setFetchState("idle");
+                // Auto-detect platform from URL
+                const detected = detectPlatform(val);
+                if (detected !== "manual") setPlatform(detected);
+              }}
               placeholder="https://www.ebay.com/itm/..."
             />
             {listingUrl.trim() && (
               <button
                 type="button"
-                onClick={() => handleUrlAnalyze(listingUrl.trim(), platform)}
-                className="shrink-0 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2.5 text-xs font-semibold text-blue-400 hover:bg-blue-500/20 hover:border-blue-500/60 transition-colors mono whitespace-nowrap"
+                onClick={handleFetchDetails}
+                disabled={fetchState === "loading"}
+                className="shrink-0 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2.5 text-xs font-semibold text-blue-400 hover:bg-blue-500/20 hover:border-blue-500/60 transition-colors mono whitespace-nowrap disabled:opacity-50"
               >
-                Fetch Details
+                {fetchState === "loading" ? "Fetching…" : fetchState === "done" ? "Re-fetch" : "Fetch Details"}
               </button>
             )}
           </div>

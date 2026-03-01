@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ListingShield</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 320px;
+      background: #0b1120;
+      color: #e2e8f0;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+    }
+
+    /* ── Header ── */
+    .header {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid #1e2a3f;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo {
+      width: 28px; height: 28px;
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 900; color: white; letter-spacing: -1px;
+      flex-shrink: 0;
+    }
+    .header-text h1 {
+      font-size: 14px; font-weight: 700; color: #f1f5f9;
+      letter-spacing: -0.3px;
+    }
+    .header-text p { font-size: 10px; color: #64748b; margin-top: 1px; }
+
+    /* ── Body sections ── */
+    .section {
+      padding: 14px 16px;
+      border-bottom: 1px solid #1e2a3f;
+    }
+    .section:last-child { border-bottom: none; }
+    .section-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #475569; margin-bottom: 10px;
+    }
+
+    /* ── Status pill ── */
+    .status-row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .dot-green  { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.5); }
+    .dot-red    { background: #ef4444; }
+    .dot-yellow { background: #f59e0b; }
+    .status-text { font-size: 12px; color: #cbd5e1; }
+
+    /* ── Listing card ── */
+    .listing-card {
+      background: #0d1b2e;
+      border: 1px solid #1e2a3f;
+      border-radius: 10px;
+      padding: 12px;
+      margin-top: 4px;
+    }
+    .listing-title {
+      font-size: 13px; font-weight: 600; color: #f1f5f9;
+      margin-bottom: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .listing-meta { font-size: 11px; color: #64748b; }
+    .listing-meta span { color: #94a3b8; }
+
+    /* ── Buttons ── */
+    .btn {
+      width: 100%; padding: 10px 14px;
+      border-radius: 8px; border: none; cursor: pointer;
+      font-size: 13px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-primary {
+      background: #2563eb; color: white;
+    }
+    .btn-primary:not(:disabled):hover { background: #3b82f6; }
+
+    .btn-fb {
+      background: #1877f2; color: white;
+    }
+    .btn-fb:not(:disabled):hover { background: #1a6be0; }
+
+    .btn-secondary {
+      background: transparent; color: #94a3b8;
+      border: 1px solid #1e2a3f;
+      font-size: 12px;
+    }
+    .btn-secondary:not(:disabled):hover { color: #f1f5f9; border-color: #334155; }
+
+    .btn-danger {
+      background: transparent; color: #ef4444;
+      border: 1px solid rgba(239,68,68,.3);
+      font-size: 12px;
+    }
+    .btn-danger:not(:disabled):hover { background: rgba(239,68,68,.08); }
+
+    .btn-gap { margin-top: 8px; }
+
+    /* ── State messages ── */
+    .info-box {
+      background: #0d1b2e; border: 1px solid #1e2a3f;
+      border-radius: 8px; padding: 10px 12px;
+      font-size: 12px; color: #94a3b8; line-height: 1.5;
+    }
+    .info-box.success {
+      border-color: rgba(34,197,94,.3);
+      background: rgba(34,197,94,.05);
+      color: #86efac;
+    }
+    .info-box.error {
+      border-color: rgba(239,68,68,.3);
+      background: rgba(239,68,68,.05);
+      color: #fca5a5;
+    }
+
+    /* ── Extracted fields preview ── */
+    .field-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+    .field-row {
+      display: flex; align-items: flex-start; gap: 6px;
+      font-size: 11px; color: #64748b;
+    }
+    .field-row .check { color: #22c55e; flex-shrink: 0; line-height: 1.6; }
+    .field-row .miss  { color: #475569; flex-shrink: 0; line-height: 1.6; }
+    .field-row .val   { color: #94a3b8; }
+
+    /* ── Settings ── */
+    .settings-toggle {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; color: #475569; cursor: pointer;
+      background: none; border: none; padding: 0;
+    }
+    .settings-toggle:hover { color: #94a3b8; }
+    .settings-panel { margin-top: 10px; display: none; }
+    .settings-panel.open { display: block; }
+    .settings-panel label {
+      display: block; font-size: 10px; color: #475569;
+      font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+      margin-bottom: 4px;
+    }
+    .settings-panel input {
+      width: 100%; background: #0d1b2e; border: 1px solid #1e2a3f;
+      border-radius: 6px; padding: 7px 10px;
+      color: #f1f5f9; font-size: 12px; font-family: monospace;
+      outline: none;
+    }
+    .settings-panel input:focus { border-color: rgba(59,130,246,.5); }
+    .settings-save {
+      margin-top: 6px; font-size: 11px; color: #3b82f6;
+      background: none; border: none; cursor: pointer; padding: 0;
+    }
+    .settings-save:hover { color: #60a5fa; }
+
+    /* Loading spinner */
+    .spin {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,.2);
+      border-top-color: white; border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ── -->
+  <div class="header">
+    <div class="logo">LS</div>
+    <div class="header-text">
+      <h1>ListingShield</h1>
+      <p>Marketplace scam detector</p>
+    </div>
+  </div>
+
+  <!-- ── Facebook connection status ── -->
+  <div class="section" id="fb-section">
+    <div class="section-label">Facebook Account</div>
+
+    <!-- Logged in state -->
+    <div id="fb-connected" class="hidden">
+      <div class="status-row">
+        <div class="dot dot-green"></div>
+        <span class="status-text">Connected — Facebook session active</span>
+      </div>
+      <button class="btn btn-danger btn-gap" id="btn-logout" style="width:auto;padding:6px 12px;">
+        Disconnect
+      </button>
+    </div>
+
+    <!-- Logged out state -->
+    <div id="fb-disconnected" class="hidden">
+      <div class="status-row" style="margin-bottom:10px;">
+        <div class="dot dot-red"></div>
+        <span class="status-text">Not connected — log in to scrape listings</span>
+      </div>
+      <button class="btn btn-fb" id="btn-fb-login">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+        Log in with Facebook
+      </button>
+      <div class="info-box" style="margin-top:8px;">
+        Logging in lets the extension read prices and seller details that Facebook hides from non-logged-in users.
+      </div>
+    </div>
+
+    <!-- Checking state -->
+    <div id="fb-checking">
+      <div class="status-row">
+        <div class="dot dot-yellow"></div>
+        <span class="status-text">Checking connection…</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Current page / listing ── -->
+  <div class="section" id="listing-section">
+    <div class="section-label">Current Page</div>
+
+    <!-- Not on a marketplace item -->
+    <div id="page-not-listing" class="hidden">
+      <div class="info-box">
+        Navigate to a <strong style="color:#f1f5f9;">Facebook Marketplace</strong> item listing to analyze it.
+      </div>
+    </div>
+
+    <!-- On a marketplace item but not logged in -->
+    <div id="page-needs-login" class="hidden">
+      <div class="info-box error">
+        Log in to Facebook first so the extension can read the full listing (price, seller info, description).
+      </div>
+    </div>
+
+    <!-- Ready to extract -->
+    <div id="page-ready" class="hidden">
+      <div class="listing-card">
+        <div class="listing-title" id="listing-url-preview">facebook.com/marketplace/item/…</div>
+        <div class="listing-meta" id="listing-status-text">Click below to extract &amp; analyze</div>
+      </div>
+
+      <!-- Extracted data preview (shown after extraction) -->
+      <div id="extracted-preview" class="hidden" style="margin-top:8px;">
+        <div class="field-list" id="field-list"></div>
+      </div>
+
+      <!-- Extract error -->
+      <div id="extract-error" class="info-box error hidden" style="margin-top:8px;"></div>
+
+      <button class="btn btn-primary btn-gap" id="btn-analyze" style="margin-top:10px;">
+        Extract &amp; Analyze Listing
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Settings ── -->
+  <div class="section">
+    <button class="settings-toggle" id="settings-toggle">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+      </svg>
+      Settings
+    </button>
+    <div class="settings-panel" id="settings-panel">
+      <label>ListingShield URL</label>
+      <input type="text" id="ls-url-input" placeholder="http://localhost:3333" />
+      <button class="settings-save" id="btn-save-settings">Save</button>
+      <span id="settings-saved" class="hidden" style="margin-left:6px;font-size:11px;color:#22c55e;">Saved ✓</span>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

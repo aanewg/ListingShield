@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "ListingShield",
+  "version": "1.0.0",
+  "description": "Detect scams on Facebook Marketplace. Scrapes listing data using your Facebook session and sends it to ListingShield for analysis.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs", "cookies"],
+  "host_permissions": [
+    "*://*.facebook.com/*",
+    "http://localhost:*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ListingShield"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://www.facebook.com/marketplace/item/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
