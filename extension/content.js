@@ -379,7 +379,7 @@ async function extractListingData() {
 
   // Prefer profile page data for seller stats (more complete),
   // fall back to listing page relay data, then DOM
-  return {
+  const merged = {
     url:               window.location.href,
     platform:          "facebook",
     title:             relay.title             ?? dom.title,
@@ -397,6 +397,18 @@ async function extractListingData() {
     _sellerId:         relay.sellerId,
     _itemsForSale:     profile.itemsForSale ?? null,
   };
+
+  // Diagnostic log — inspect in DevTools > Extensions > ListingShield > background
+  console.log("[ListingShield] extractListingData result:", {
+    sellerUsername:    relay.sellerUsername,
+    sellerAccountAge:  profile.sellerAccountAge  ?? relay.sellerAccountAge,
+    sellerReviewCount: profile.sellerReviewCount ?? relay.sellerReviewCount,
+    sellerAvgRating:   profile.sellerAvgRating   ?? relay.sellerAvgRating,
+    sellerId:          relay.sellerId,
+    profileFetched:    !!relay.sellerId,
+  });
+
+  return merged;
 }
 
 // ─── Message listener ─────────────────────────────────────────────────────────

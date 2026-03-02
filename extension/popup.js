@@ -112,15 +112,19 @@ el("btn-analyze").addEventListener("click", async () => {
     const hasDesc    = !!data.description;
     const hasSeller  = !!data.sellerUsername;
     const hasAge     = data.sellerAccountAge !== null;
+    const hasReviews = data.sellerReviewCount != null;
+    const hasRating  = data.sellerAvgRating   != null;
     const hasImgs    = data.imageUrls?.length > 0;
 
     el("field-list").innerHTML = [
       fmt(data.title,             "Title"),
       fmt(hasPrice ? `$${data.price}` : null, "Price"),
       fmt(data.description,       "Description"),
-      fmt(hasSeller ? data.sellerUsername : null, "Seller"),
-      fmt(hasAge ? `${data.sellerAccountAge} days` : null, "Account age"),
-      fmt(hasImgs ? `${data.imageUrls.length} image(s)` : null, "Images"),
+      fmt(hasSeller  ? data.sellerUsername               : null, "Seller"),
+      fmt(hasAge     ? `${data.sellerAccountAge} days`   : null, "Account age"),
+      fmt(hasReviews ? data.sellerReviewCount             : null, "Reviews"),
+      fmt(hasRating  ? data.sellerAvgRating               : null, "Avg rating"),
+      fmt(hasImgs    ? `${data.imageUrls.length} image(s)`: null, "Images"),
     ].join("");
 
     show("extracted-preview");

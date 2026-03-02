@@ -116,7 +116,10 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
   // ── Effects ───────────────────────────────────────────────────────────────
   // If a URL was provided (came from the home page input), auto-submit immediately
   useEffect(() => {
-    if (initialUrl) {
+    // Skip auto-scrape when initialData is already provided (extension import).
+    // The form is pre-seeded with extension data on mount; firing handleUrlAnalyze()
+    // would overwrite those values with the server-side SCRAPE_PARTIAL skeleton.
+    if (initialUrl && !initialData) {
       handleUrlAnalyze();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
