@@ -19,6 +19,8 @@ interface ExtensionData {
   sellerReviewCount?: number;
   sellerAvgRating?:   number;
   sellerIsVerified?:  boolean;
+  _sellerId?:         string;
+  _itemsForSale?:     number;
 }
 
 function decodeExtensionData(raw: string): ExtensionData | null {
