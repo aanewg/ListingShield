@@ -2,19 +2,29 @@
 
 import { useEffect, useState } from "react";
 
+// Steps 1–4 run on fixed timers. Step 5 activates on a timer but only
+// completes when the parent signals isDone=true (i.e. the API has responded).
 const STEPS = [
-  { id: 1, label: "Initializing scan engine",     ms: 300  },
-  { id: 2, label: "Checking price data",           ms: 800  },
-  { id: 3, label: "Analyzing seller profile",      ms: 1400 },
-  { id: 4, label: "Scanning description for flags",ms: 1900 },
-  { id: 5, label: "Calculating trust score",       ms: 2400 },
+  { id: 1, label: "Initializing scan engine",      ms: 400  },
+  { id: 2, label: "Checking price data",            ms: 1000 },
+  { id: 3, label: "Analyzing seller profile",       ms: 1700 },
+  { id: 4, label: "Scanning description for flags", ms: 2400 },
+  { id: 5, label: "Calculating trust score",        ms: 2900 },
 ];
 
-export function AnalysisLoader() {
+// Progress when each step becomes active (step 5 stays here until isDone)
+const ACTIVE_PROGRESS = [18, 38, 58, 78, 88];
+
+interface Props {
+  isDone?: boolean;
+}
+
+export function AnalysisLoader({ isDone = false }: Props) {
   const [completedIds, setCompletedIds] = useState<Set<number>>(new Set());
   const [activeId, setActiveId]         = useState<number>(1);
   const [progress, setProgress]         = useState(0);
 
+  // Fixed timers: steps 1–4 fully complete; step 5 only activates
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
 
@@ -22,7 +32,7 @@ export function AnalysisLoader() {
       timers.push(
         setTimeout(() => {
           setActiveId(step.id);
-          setProgress(Math.round(((i + 1) / STEPS.length) * 100));
+          setProgress(ACTIVE_PROGRESS[i]);
           if (i > 0) {
             setCompletedIds((prev) => new Set([...prev, STEPS[i - 1].id]));
           }
@@ -30,16 +40,18 @@ export function AnalysisLoader() {
       );
     });
 
-    // Mark last step complete slightly after it starts
-    timers.push(
-      setTimeout(() => {
-        setCompletedIds((prev) => new Set([...prev, STEPS[STEPS.length - 1].id]));
-        setProgress(100);
-      }, 2700)
-    );
-
     return () => timers.forEach(clearTimeout);
   }, []);
+
+  // Complete step 5 only once the API call is actually done
+  useEffect(() => {
+    if (!isDone) return;
+    const timer = setTimeout(() => {
+      setCompletedIds((prev) => new Set([...prev, 5]));
+      setProgress(100);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [isDone]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#06080d]/95 backdrop-blur-sm">

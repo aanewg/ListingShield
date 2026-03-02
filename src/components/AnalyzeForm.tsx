@@ -93,6 +93,7 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
 
   // ── UI state ─────────────────────────────────────────────────────────────
   const [isLoading,       setIsLoading]       = useState(false);
+  const [analysisReady,   setAnalysisReady]   = useState(false);
   const [error,           setError]           = useState<string | null>(null);
   const [showManual,      setShowManual]      = useState(!initialUrl || !!initialData);
   const [screenshotState, setScreenshotState] = useState<"idle" | "loading" | "done" | "error">("idle");
@@ -129,6 +130,7 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
     if (!targetUrl) return;
 
     setIsLoading(true);
+    setAnalysisReady(false);
     setError(null);
     try {
       const [response] = await Promise.all([
@@ -137,7 +139,7 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
           headers: { "Content-Type": "application/json" },
           body:    JSON.stringify({ listingUrl: targetUrl, platform: targetPlatform }),
         }),
-        new Promise((resolve) => setTimeout(resolve, 2800)),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
       ]);
 
       if (!response.ok) {
@@ -172,6 +174,9 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
       }
 
       const data = await response.json() as { id: string };
+      // Signal the loader that analysis is done, then wait for completion animation
+      setAnalysisReady(true);
+      await new Promise((resolve) => setTimeout(resolve, 600));
       router.push(`/results/${data.id}`);
     } catch {
       setError("Something went wrong. Please fill in the details manually.");
@@ -280,6 +285,7 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
     }
 
     setIsLoading(true);
+    setAnalysisReady(false);
 
     const body = {
       platform,
@@ -303,7 +309,7 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         }),
-        new Promise((resolve) => setTimeout(resolve, 2800)),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
       ]);
 
       if (!response.ok) {
@@ -312,6 +318,8 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
       }
 
       const data = await response.json() as { id: string };
+      setAnalysisReady(true);
+      await new Promise((resolve) => setTimeout(resolve, 600));
       router.push(`/results/${data.id}`);
     } catch (err) {
       setIsLoading(false);
@@ -321,7 +329,7 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  if (isLoading) return <AnalysisLoader />;
+  if (isLoading) return <AnalysisLoader isDone={analysisReady} />;
 
   if (!showManual) return null;
 

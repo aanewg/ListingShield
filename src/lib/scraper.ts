@@ -20,11 +20,22 @@ export interface ScrapedListing {
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
-function daysAgo(dateStr: string): number | null {
+/** Convert any timestamp representation to days-since-that-date.
+ *  - number < 1e10  → Unix seconds (epoch ~2001 at boundary; safe for all real dates)
+ *  - number >= 1e10 → Unix milliseconds
+ *  - string         → parsed as ISO 8601 by the Date constructor
+ */
+function daysAgo(value: string | number): number | null {
   try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return null;
-    const days = Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+    let ms: number;
+    if (typeof value === "number") {
+      ms = value < 1e10 ? value * 1000 : value;
+    } else {
+      const d = new Date(value);
+      if (isNaN(d.getTime())) return null;
+      ms = d.getTime();
+    }
+    const days = Math.floor((Date.now() - ms) / (1000 * 60 * 60 * 24));
     return days >= 0 ? days : null;
   } catch { return null; }
 }
@@ -262,6 +273,105 @@ async function scrapeFacebook(url: string): Promise<ScrapedListing | null> {
   return null;
 }
 
+// ─── eBay member-since date parser ────────────────────────────────────────────
+
+/** Maps 3-letter month abbreviations (lower-cased) to zero-padded month numbers. */
+const MONTH_ABBREVS: Readonly<Record<string, string>> = {
+  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+  jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+};
+
+/** Return the two-digit month string for any full or abbreviated month name. */
+function monthIndex(name: string): string {
+  return MONTH_ABBREVS[name.toLowerCase().slice(0, 3)] ?? "01";
+}
+
+/**
+ * Parse eBay's many memberSince date formats into days-since.
+ * Handles all observed formats:
+ *   "2019-01-15"   ISO 8601 full date
+ *   "2019-01"      ISO year-month (assumes 1st)
+ *   "Jan 15, 2019" named month + explicit day
+ *   "January 2019" named month only (assumes 1st)
+ *   "15-Jan-19"    DD-MMM-YY legacy compact
+ *   "Jan-19"       MMM-YY legacy short (assumes 1st)
+ */
+function parseMemberSince(raw: string): number | null {
+  const s = raw.trim();
+
+  // ISO 8601 full ("2019-01-15") or year-month ("2019-01") — pass straight to daysAgo
+  if (/^\d{4}-\d{2}/.test(s)) return daysAgo(s);
+
+  // "January 15, 2019" or "Jan 15, 2019" — named month with explicit day
+  const mdy = s.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (mdy) return daysAgo(`${mdy[3]}-${monthIndex(mdy[1])}-${mdy[2].padStart(2, "0")}`);
+
+  // "January 2019" or "Jan 2019" — no day given, default to 1st
+  const my = s.match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if (my) return daysAgo(`${my[2]}-${monthIndex(my[1])}-01`);
+
+  // "15-Jan-19" — DD-MMM-YY eBay legacy compact format
+  const dmyShort = s.match(/^(\d{1,2})-([A-Za-z]+)-(\d{2})$/);
+  if (dmyShort) {
+    const yy   = parseInt(dmyShort[3], 10);
+    const year = yy >= 70 ? 1900 + yy : 2000 + yy;
+    return daysAgo(`${year}-${monthIndex(dmyShort[2])}-${dmyShort[1].padStart(2, "0")}`);
+  }
+
+  // "Jan-19" — MMM-YY eBay short format, default to 1st of that month
+  const myShort = s.match(/^([A-Za-z]+)-(\d{2})$/);
+  if (myShort) {
+    const yy   = parseInt(myShort[2], 10);
+    const year = yy >= 70 ? 1900 + yy : 2000 + yy;
+    return daysAgo(`${year}-${monthIndex(myShort[1])}-01`);
+  }
+
+  // Last resort: let the JS Date constructor attempt native parsing
+  return daysAgo(s);
+}
+
+// ─── __NEXT_DATA__ deep seller search ─────────────────────────────────────────
+
+/**
+ * Recursively search a parsed __NEXT_DATA__ tree for a seller-shaped node.
+ * Fingerprint: node must satisfy at least TWO of these three categories:
+ *   identity  — has key: name | username | handle
+ *   rating    — has key: rating | reviewsTotal | reviewsAverage | avg_rating | rating_count
+ *   creation  — has key: created | created_at | joined_at | registration_date | member_since
+ *
+ * Depth-limited to 8 to avoid runaway traversal on large page blobs.
+ */
+function deepFindSeller(obj: unknown, depth = 0): Record<string, unknown> | null {
+  if (depth > 8 || obj === null || typeof obj !== "object") return null;
+
+  // Recurse into arrays — sellers can be nested inside lists
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = deepFindSeller(item, depth + 1);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+
+  const o = obj as Record<string, unknown>;
+
+  // Evaluate fingerprint across three independent categories
+  const hasIdentity = "name"     in o || "username"       in o || "handle"       in o;
+  const hasRating   = "rating"   in o || "reviewsTotal"   in o || "reviewsAverage" in o ||
+                      "avg_rating" in o || "rating_count" in o;
+  const hasCreation = "created"  in o || "created_at"     in o || "joined_at"    in o ||
+                      "registration_date" in o || "member_since" in o;
+
+  const score = (hasIdentity ? 1 : 0) + (hasRating ? 1 : 0) + (hasCreation ? 1 : 0);
+  if (score >= 2) return o;
+
+  for (const val of Object.values(o)) {
+    const found = deepFindSeller(val, depth + 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
 // ─── Platform-specific helpers ────────────────────────────────────────────────
 
 /** Pull __NEXT_DATA__ JSON safely, returning the parsed object or null. */
@@ -274,55 +384,82 @@ function getNextData(html: string): Record<string, unknown> | null {
 function extractEbayData(html: string): Partial<ScrapedListing> {
   const data: Partial<ScrapedListing> = {};
 
-  // Price
+  // ── Price (unchanged) ─────────────────────────────────────────────────────
+  // Microdata itemprop="price" content attribute — most reliable eBay price source
   const priceContent =
     html.match(/itemprop=["']price["'][^>]+content=["']([\d.]+)["']/i)?.[1] ??
     html.match(/content=["']([\d.]+)["'][^>]+itemprop=["']price["']/i)?.[1];
   if (priceContent) data.price = parseFloat(priceContent);
 
-  // Seller username — eBay's new markup embeds "username":"seller_name" in the page JSON
+  // ── Seller username ───────────────────────────────────────────────────────
+  // Primary: "username":"value" embedded in eBay's React/VIBES page data JSON
   const usernameJson = html.match(/"username"\s*:\s*"([^"]{2,50})"/)?.[1];
   if (usernameJson) data.sellerUsername = usernameJson;
-  // Fallback: old /usr/USERNAME link pattern
+  // Fallback: /usr/USERNAME anchor href pattern in rendered HTML
   if (!data.sellerUsername) {
     const usrLink = html.match(/\/usr\/([^"'?/#\s]{2,50})/)?.[1];
     if (usrLink) data.sellerUsername = decodeEntities(usrLink);
   }
 
-  // Account age — eBay embeds memberSince in page JSON
-  const memberSince =
-    html.match(/"memberSince"\s*:\s*"([^"]{8,30})"/)?.[1] ??
-    html.match(/"member_since"\s*:\s*"([^"]{8,30})"/)?.[1] ??
-    html.match(/Member since (\w+ \d{4})/i)?.[1];
-  if (memberSince) {
-    const days = daysAgo(memberSince);
-    if (days !== null && days >= 0) data.sellerAccountAge = days;
+  // ── Account age ───────────────────────────────────────────────────────────
+  // Primary: "memberSince" or "member_since" JSON keys — many date formats observed;
+  // parseMemberSince handles ISO, "Jan 2019", "Jan-19", "15-Jan-19", etc.
+  const memberSinceRaw =
+    html.match(/"memberSince"\s*:\s*"([^"]{4,30})"/)?.[1] ??
+    html.match(/"member_since"\s*:\s*"([^"]{4,30})"/)?.[1];
+  if (memberSinceRaw) {
+    const days = parseMemberSince(memberSinceRaw);
+    if (days !== null) data.sellerAccountAge = days;
+  }
+  // Fallback: "Member since Month YYYY" (or "Month DD, YYYY") visible page text
+  if (data.sellerAccountAge === undefined) {
+    // Capture everything after "Member since" up to a likely delimiter
+    const textMatch = html.match(
+      /[Mm]ember\s+since\s+([A-Za-z]+(?:\s+\d{1,2},?)?\s+\d{2,4})/
+    )?.[1];
+    if (textMatch) {
+      const days = parseMemberSince(textMatch);
+      if (days !== null) data.sellerAccountAge = days;
+    }
   }
 
-  // Feedback / review count — eBay embeds in page JSON
-  const fbRaw =
-    html.match(/"(?:feedbackCount|positiveCount|feedback_count|feedbackScore)"\s*:\s*(\d+)/)?.[1] ??
-    html.match(/(\d[\d,]*)\s+(?:feedback|ratings?)\b/i)?.[1]?.replace(/,/g, "");
-  if (fbRaw) data.sellerReviewCount = parseInt(fbRaw, 10);
-
-  // Rating: eBay uses positive-feedback %; convert to 5-star equivalent
-  const posPct = html.match(/"positivePercentage"\s*:\s*([\d.]+)/)?.[1]
-    ?? html.match(/"feedbackPercentage"\s*:\s*"([\d.]+)%?"/)?.[1];
-  if (posPct) {
-    data.sellerAvgRating = Math.round((parseFloat(posPct) / 100) * 5 * 10) / 10;
+  // ── Review count ──────────────────────────────────────────────────────────
+  // Primary: JSON key variants used across eBay's API responses and page blobs
+  const fbRawJson = html.match(
+    /"(?:feedbackCount|positiveCount|feedback_count|feedbackScore)"\s*:\s*(\d+)/
+  )?.[1];
+  if (fbRawJson) data.sellerReviewCount = parseInt(fbRawJson, 10);
+  // Fallback 1: "1,234 feedback" or "1,234 ratings" visible text (commas stripped)
+  if (data.sellerReviewCount === undefined) {
+    const textRaw = html.match(/(\d[\d,]*)\s+(?:feedback|ratings?)\b/i)?.[1]?.replace(/,/g, "");
+    if (textRaw) data.sellerReviewCount = parseInt(textRaw, 10);
   }
-
-  // Fallback to JSON-LD aggregateRating
-  if (!data.sellerAvgRating) {
-    const rv = html.match(/"ratingValue"\s*:\s*"?([\d.]+)"?/)?.[1];
-    if (rv) data.sellerAvgRating = parseFloat(rv);
-  }
-  if (!data.sellerReviewCount) {
+  // Fallback 2: JSON-LD reviewCount (product aggregate — less precise but available)
+  if (data.sellerReviewCount === undefined) {
     const rc = html.match(/"reviewCount"\s*:\s*"?(\d+)"?/)?.[1];
     if (rc) data.sellerReviewCount = parseInt(rc, 10);
   }
 
-  // Top Rated Seller → treat as verified
+  // ── Rating ────────────────────────────────────────────────────────────────
+  // Primary: positive-feedback percentage → 5-star approximation.
+  // ⚠️ This conversion is intentionally lossy: 98% ≈ 4.9★ is indistinguishable
+  // from 99% ≈ 4.95★. It is the only public seller-quality signal eBay exposes.
+  // Result is clamped to 5.0 in case the platform ever returns > 100%.
+  const posPct =
+    html.match(/"positivePercentage"\s*:\s*([\d.]+)/)?.[1] ??
+    // feedbackPercentage may include a trailing % inside the quoted value
+    html.match(/"feedbackPercentage"\s*:\s*"?([\d.]+)%?/)?.[1];
+  if (posPct) {
+    data.sellerAvgRating = Math.min(5.0, Math.round((parseFloat(posPct) / 100) * 5 * 10) / 10);
+  }
+  // Fallback: JSON-LD aggregateRating.ratingValue (product reviews, not seller — use if no %)
+  if (data.sellerAvgRating === undefined) {
+    const rv = html.match(/"ratingValue"\s*:\s*"?([\d.]+)"?/)?.[1];
+    if (rv) data.sellerAvgRating = Math.min(5.0, parseFloat(rv));
+  }
+
+  // ── Verified (Top Rated Seller badge) ─────────────────────────────────────
+  // "topRatedSeller":true in JSON data, or visible "Top Rated Seller" badge text
   if (/"topRatedSeller"\s*:\s*true/i.test(html) || /top[\s-]rated\s+seller/i.test(html)) {
     data.sellerIsVerified = true;
   }
@@ -333,47 +470,73 @@ function extractEbayData(html: string): Partial<ScrapedListing> {
 function extractMercariData(html: string): Partial<ScrapedListing> {
   const data: Partial<ScrapedListing> = {};
 
-  // Price (simple JSON)
+  // Price — "price":12345 integer in __NEXT_DATA__
   const pm = html.match(/"price"\s*:\s*(\d+)/);
   if (pm) data.price = parseInt(pm[1], 10);
 
-  // __NEXT_DATA__ — most reliable source for seller profile
-  const nd = getNextData(html);
-  const ndPP = (nd?.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined;
-  const ndData = ndPP?.data as Record<string, unknown> | undefined;
-  const item = (ndPP?.item ?? ndData?.item) as Record<string, unknown> | undefined;
-  if (item) {
-    if (!data.price && item.price) data.price = parseInt(String(item.price), 10);
-    const s = item.seller as Record<string, unknown> | undefined;
-    if (s) {
-      if (s.name)        data.sellerUsername    = String(s.name);
-      const rating = s.rating as Record<string, unknown> | undefined;
-      if (rating?.count)   data.sellerReviewCount = Number(rating.count);
-      if (rating?.average) data.sellerAvgRating   = parseFloat(String(rating.average));
-      if (s.is_verified)   data.sellerIsVerified  = true;
-      // Account age from created / registration timestamps
-      const created = (s.created ?? s.registration_date ?? s.created_at) as string | undefined;
-      if (created) {
-        const days = daysAgo(String(created));
-        if (days !== null) data.sellerAccountAge = days;
+  // ── __NEXT_DATA__ (primary path for all seller fields) ────────────────────
+  try {
+    const nd = getNextData(html);
+    if (nd) {
+      const ndPP   = (nd.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined;
+      const ndData = ndPP?.data as Record<string, unknown> | undefined;
+      // Item lives at pageProps.item OR pageProps.data.item depending on page type
+      const item   = (ndPP?.item ?? ndData?.item) as Record<string, unknown> | undefined;
+
+      let s: Record<string, unknown> | null = null;
+      if (item) {
+        if (!data.price && item.price) data.price = parseInt(String(item.price), 10);
+        s = (item.seller as Record<string, unknown> | undefined) ?? null;
+      }
+      // Deep-search fallback: handles alternate nesting (search vs. item page)
+      if (!s) s = deepFindSeller(nd);
+
+      if (s) {
+        // Mercari displays sellers by name (display name, not a handle/username)
+        if (s.name)        data.sellerUsername    = String(s.name);
+        const rating = s.rating as Record<string, unknown> | undefined;
+        if (rating?.count)   data.sellerReviewCount = Number(rating.count);
+        if (rating?.average) data.sellerAvgRating   = parseFloat(String(rating.average));
+        if (s.is_verified)   data.sellerIsVerified  = Boolean(s.is_verified);
+        // Timestamps may be Unix seconds (number) or ISO strings; daysAgo handles both
+        const created = s.created ?? s.registration_date ?? s.created_at;
+        if (created !== undefined && created !== null) {
+          const days = daysAgo(created as string | number);
+          if (days !== null) data.sellerAccountAge = days;
+        }
       }
     }
-  }
+  } catch { /* __NEXT_DATA__ missing or malformed — fall through to regex patterns */ }
 
-  // Fallback patterns
+  // ── Regex fallbacks ───────────────────────────────────────────────────────
+  // sellerUsername: "name" key inside a "seller" object block (~300 char scan)
   if (!data.sellerUsername) {
     const nm = html.match(/"seller"\s*:\s*\{[^}]{0,300}"name"\s*:\s*"([^"]{2,50})"/)?.[1];
     if (nm) data.sellerUsername = nm;
   }
-  if (!data.sellerReviewCount) {
+  // sellerReviewCount: "count" key inside a "rating" object block (~200 char scan)
+  if (data.sellerReviewCount === undefined) {
     const rc = html.match(/"rating"\s*:\s*\{[^}]{0,200}"count"\s*:\s*(\d+)/)?.[1];
     if (rc) data.sellerReviewCount = parseInt(rc, 10);
   }
-  if (!data.sellerAvgRating) {
+  // sellerAvgRating: "average" (Mercari) or "stars" float anywhere in page
+  if (data.sellerAvgRating === undefined) {
     const ra = html.match(/"(?:average|stars)"\s*:\s*([\d.]+)/)?.[1];
     if (ra) data.sellerAvgRating = parseFloat(ra);
   }
-  if (!data.sellerIsVerified) data.sellerIsVerified = /"is_verified"\s*:\s*true/.test(html);
+  // sellerIsVerified: bare boolean flag anywhere in page JSON
+  if (data.sellerIsVerified === undefined) {
+    if (/"is_verified"\s*:\s*true/.test(html)) data.sellerIsVerified = true;
+  }
+  // sellerAccountAge: ISO date string for creation/registration fields
+  if (data.sellerAccountAge === undefined) {
+    const createdRaw =
+      html.match(/"(?:created|registration_date|created_at)"\s*:\s*"([^"]{8,30})"/)?.[1];
+    if (createdRaw) {
+      const days = daysAgo(createdRaw);
+      if (days !== null) data.sellerAccountAge = days;
+    }
+  }
 
   return data;
 }
@@ -381,43 +544,71 @@ function extractMercariData(html: string): Partial<ScrapedListing> {
 function extractPoshmarkData(html: string): Partial<ScrapedListing> {
   const data: Partial<ScrapedListing> = {};
 
-  // Price
+  // Price — can be quoted ("50.00") or bare number
   const pm = html.match(/"price"\s*:\s*"?([\d.]+)"?/);
   if (pm) data.price = parseFloat(pm[1]);
 
-  // Username from closet URL in page
+  // Preliminary username from closet URL — overridden by __NEXT_DATA__ handle if available
   const closet = html.match(/\/closet\/([^"'?/#\s]{2,40})/)?.[1];
   if (closet) data.sellerUsername = closet;
 
-  // __NEXT_DATA__
-  const nd = getNextData(html);
-  const pp = (nd?.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined;
-  const listing = pp?.listing ?? pp?.data as Record<string, unknown> | undefined;
-  const s = (listing as Record<string, unknown> | undefined)?.seller ??
-            (listing as Record<string, unknown> | undefined)?.creator as Record<string, unknown> | undefined;
-  if (s) {
-    const ps = s as Record<string, unknown>;
-    if (ps.handle)            data.sellerUsername    = String(ps.handle);
-    if (ps.avg_rating)        data.sellerAvgRating   = parseFloat(String(ps.avg_rating));
-    if (ps.rating_count)      data.sellerReviewCount = parseInt(String(ps.rating_count), 10);
-    if (ps.identity_verified) data.sellerIsVerified  = true;
-    const joined = (ps.list_item_party_started ?? ps.joined_at ?? ps.member_since ?? ps.created_at) as string | undefined;
-    if (joined) {
-      const days = daysAgo(String(joined));
-      if (days !== null) data.sellerAccountAge = days;
-    }
-  }
+  // ── __NEXT_DATA__ (primary path for all seller fields) ────────────────────
+  try {
+    const nd = getNextData(html);
+    if (nd) {
+      const pp = (nd.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined;
+      // Listing lives at pageProps.listing OR pageProps.data depending on page version;
+      // use explicit casts with correct precedence (not pp?.data as X ?? pp?.listing as X)
+      const listing =
+        (pp?.listing as Record<string, unknown> | undefined) ??
+        (pp?.data    as Record<string, unknown> | undefined);
+      // Seller may be listing.seller, listing.creator, or found via deep-search
+      const s =
+        (listing?.seller  as Record<string, unknown> | undefined) ??
+        (listing?.creator as Record<string, unknown> | undefined) ??
+        deepFindSeller(nd);
 
-  // Fallback patterns
-  if (!data.sellerAvgRating) {
+      if (s) {
+        if (s.handle)            data.sellerUsername    = String(s.handle);
+        if (s.avg_rating)        data.sellerAvgRating   = parseFloat(String(s.avg_rating));
+        if (s.rating_count)      data.sellerReviewCount = parseInt(String(s.rating_count), 10);
+        if (s.identity_verified) data.sellerIsVerified  = Boolean(s.identity_verified);
+        // ⚠️ list_item_party_started is intentionally excluded — it records when the seller
+        // joined a Poshmark sharing party, NOT when their account was created, and produces
+        // artificially recent account ages that skew the fraud score upward.
+        const joined = s.joined_at ?? s.member_since ?? s.created_at;
+        if (joined !== undefined && joined !== null) {
+          const days = daysAgo(joined as string | number);
+          if (days !== null) data.sellerAccountAge = days;
+        }
+      }
+    }
+  } catch { /* __NEXT_DATA__ missing or malformed — fall through to regex patterns */ }
+
+  // ── Regex fallbacks ───────────────────────────────────────────────────────
+  // sellerAvgRating: bare "avg_rating" float anywhere in the page JSON
+  if (data.sellerAvgRating === undefined) {
     const ra = html.match(/"avg_rating"\s*:\s*"?([\d.]+)"?/)?.[1];
     if (ra) data.sellerAvgRating = parseFloat(ra);
   }
-  if (!data.sellerReviewCount) {
+  // sellerReviewCount: bare "rating_count" integer
+  if (data.sellerReviewCount === undefined) {
     const rc = html.match(/"rating_count"\s*:\s*(\d+)/)?.[1];
     if (rc) data.sellerReviewCount = parseInt(rc, 10);
   }
-  if (!data.sellerIsVerified) data.sellerIsVerified = /"identity_verified"\s*:\s*true/.test(html);
+  // sellerIsVerified: "identity_verified":true flag
+  if (data.sellerIsVerified === undefined) {
+    if (/"identity_verified"\s*:\s*true/.test(html)) data.sellerIsVerified = true;
+  }
+  // sellerAccountAge: ISO date string for any join/creation field
+  if (data.sellerAccountAge === undefined) {
+    const joinedRaw =
+      html.match(/"(?:joined_at|member_since|created_at)"\s*:\s*"([^"]{8,30})"/)?.[1];
+    if (joinedRaw) {
+      const days = daysAgo(joinedRaw);
+      if (days !== null) data.sellerAccountAge = days;
+    }
+  }
 
   return data;
 }
@@ -425,45 +616,72 @@ function extractPoshmarkData(html: string): Partial<ScrapedListing> {
 function extractDepopData(html: string): Partial<ScrapedListing> {
   const data: Partial<ScrapedListing> = {};
 
-  // Price
+  // Price — can be quoted ("29.99") or bare number
   const pm = html.match(/"price"\s*:\s*"?([\d.]+)"?/);
   if (pm) data.price = parseFloat(pm[1]);
 
-  // __NEXT_DATA__
-  const nd = getNextData(html);
-  const pp = (nd?.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined;
-  const product = pp?.product ?? pp?.data as Record<string, unknown> | undefined;
-  if (product) {
-    const dp = product as Record<string, unknown>;
-    if (!data.price && dp.price) data.price = parseFloat(String(dp.price));
-    const s = dp.seller as Record<string, unknown> | undefined;
-    if (s) {
-      if (s.username)       data.sellerUsername    = String(s.username);
-      if (s.reviewsTotal)   data.sellerReviewCount = parseInt(String(s.reviewsTotal), 10);
-      if (s.reviewsAverage) data.sellerAvgRating   = parseFloat(String(s.reviewsAverage));
-      if (s.verified)       data.sellerIsVerified  = true;
-      const created = (s.created ?? s.created_at ?? s.joined_at) as string | undefined;
-      if (created) {
-        const days = daysAgo(String(created));
-        if (days !== null) data.sellerAccountAge = days;
+  // ── __NEXT_DATA__ (primary path for all seller fields) ────────────────────
+  try {
+    const nd = getNextData(html);
+    if (nd) {
+      const pp = (nd.props as Record<string, unknown> | undefined)?.pageProps as Record<string, unknown> | undefined;
+      // Product lives at pageProps.product OR pageProps.data depending on page type
+      const product =
+        (pp?.product as Record<string, unknown> | undefined) ??
+        (pp?.data    as Record<string, unknown> | undefined);
+
+      let s: Record<string, unknown> | null = null;
+      if (product) {
+        if (!data.price && product.price) data.price = parseFloat(String(product.price));
+        s = (product.seller as Record<string, unknown> | undefined) ?? null;
+      }
+      // Deep-search fallback: handles alternate nesting on profile/shop pages
+      if (!s) s = deepFindSeller(nd);
+
+      if (s) {
+        if (s.username)       data.sellerUsername    = String(s.username);
+        if (s.reviewsTotal)   data.sellerReviewCount = parseInt(String(s.reviewsTotal), 10);
+        if (s.reviewsAverage) data.sellerAvgRating   = parseFloat(String(s.reviewsAverage));
+        if (s.verified)       data.sellerIsVerified  = Boolean(s.verified);
+        // Timestamps may be Unix seconds (number) or ISO strings; daysAgo handles both
+        const created = s.created ?? s.created_at ?? s.joined_at;
+        if (created !== undefined && created !== null) {
+          const days = daysAgo(created as string | number);
+          if (days !== null) data.sellerAccountAge = days;
+        }
       }
     }
-  }
+  } catch { /* __NEXT_DATA__ missing or malformed — fall through to regex patterns */ }
 
-  // Fallback patterns
+  // ── Regex fallbacks ───────────────────────────────────────────────────────
+  // sellerUsername: bare "username" key in Depop page JSON (not wrapped in object)
   if (!data.sellerUsername) {
     const un = html.match(/"username"\s*:\s*"([^"]{2,40})"/)?.[1];
     if (un) data.sellerUsername = un;
   }
-  if (!data.sellerReviewCount) {
+  // sellerReviewCount: bare "reviewsTotal" integer
+  if (data.sellerReviewCount === undefined) {
     const rt = html.match(/"reviewsTotal"\s*:\s*(\d+)/)?.[1];
     if (rt) data.sellerReviewCount = parseInt(rt, 10);
   }
-  if (!data.sellerAvgRating) {
+  // sellerAvgRating: bare "reviewsAverage" float
+  if (data.sellerAvgRating === undefined) {
     const ra = html.match(/"reviewsAverage"\s*:\s*([\d.]+)/)?.[1];
     if (ra) data.sellerAvgRating = parseFloat(ra);
   }
-  if (!data.sellerIsVerified) data.sellerIsVerified = /"verified"\s*:\s*true/.test(html);
+  // sellerIsVerified: bare "verified":true boolean flag
+  if (data.sellerIsVerified === undefined) {
+    if (/"verified"\s*:\s*true/.test(html)) data.sellerIsVerified = true;
+  }
+  // sellerAccountAge: ISO date string for any creation/join timestamp field
+  if (data.sellerAccountAge === undefined) {
+    const createdRaw =
+      html.match(/"(?:created|created_at|joined_at)"\s*:\s*"([^"]{8,30})"/)?.[1];
+    if (createdRaw) {
+      const days = daysAgo(createdRaw);
+      if (days !== null) data.sellerAccountAge = days;
+    }
+  }
 
   return data;
 }

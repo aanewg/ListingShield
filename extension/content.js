@@ -16,9 +16,24 @@ function decodeRelayString(str) {
     .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
 }
 
-function daysAgo(unixSeconds) {
-  const ms = Date.now() - unixSeconds * 1000;
-  return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
+/** Convert any timestamp to days-since.
+ *  - number < 1e10  → Unix seconds (epoch ~2001 at boundary; all real dates are below this)
+ *  - number >= 1e10 → Unix milliseconds
+ *  - string         → parsed as ISO 8601 by Date constructor
+ *  Returns null for invalid or unrecognised input.
+ */
+function daysAgo(value) {
+  let ms;
+  if (typeof value === "number") {
+    ms = value < 1e10 ? value * 1000 : value;
+  } else if (typeof value === "string") {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return null;
+    ms = d.getTime();
+  } else {
+    return null;
+  }
+  return Math.max(0, Math.floor((Date.now() - ms) / (1000 * 60 * 60 * 24)));
 }
 
 // Pull all inline script text that's related to marketplace data
@@ -66,84 +81,141 @@ function extractFromRelayStore() {
   if (!combined) return result;
 
   // ── Title ────────────────────────────────────────────────────────────────
+  // Both key names observed across FB Relay versions
   const titleMatch = combined.match(
     /"(?:marketplace_listing_title|base_marketplace_listing_title)"\s*:\s*"((?:[^"\\]|\\.)*)"/
   );
   if (titleMatch) result.title = decodeRelayString(titleMatch[1]);
 
   // ── Price ────────────────────────────────────────────────────────────────
+  // Primary: "listing_price":{"amount":"40.00",...} — scan within the object body
   const priceBlock = combined.match(/"listing_price"\s*:\s*\{[^}]{0,400}"amount"\s*:\s*"([\d.]+)"/);
   if (priceBlock) { const v = parseFloat(priceBlock[1]); if (v > 0) result.price = v; }
-
+  // Fallback: "formatted_amount":"$40.00" — dollar-sign prefixed quoted string
   if (!result.price) {
     const fmtMatch = combined.match(/"formatted_amount"\s*:\s*"\$([\d,]+(?:\.\d{1,2})?)"/);
     if (fmtMatch) result.price = parseFloat(fmtMatch[1].replace(/,/g, ""));
   }
 
   // ── Description ──────────────────────────────────────────────────────────
+  // redacted_description is the canonical listing text key in the FB Relay store
   const descMatch = combined.match(/"redacted_description"\s*:\s*\{"text"\s*:\s*"((?:[^"\\]|\\.)*)"/);
   if (descMatch) result.description = decodeRelayString(descMatch[1]);
 
   // ── Seller block ─────────────────────────────────────────────────────────
-  // FB embeds the full seller User node — extract the whole block first so
-  // we can run sub-patterns against it without false-matching other users.
+  // FB embeds the full seller User node as a deeply nested object — use brace-matching
+  // (extractBlock) since the outer block contains nested objects (marketplace_rating, etc.)
+  // The inner flat sub-blocks (marketplace_rating, registration_date) use targeted regexes
+  // below to avoid failures when escaped strings inside them contain literal braces.
   const sellerBlock = extractBlock(combined, "marketplace_listing_seller") || "";
 
-  // Seller ID
+  // ── Seller ID ─────────────────────────────────────────────────────────────
+  // FB user IDs are pure digit strings, 5–20 digits
   const sellerIdMatch = sellerBlock.match(/"id"\s*:\s*"(\d{5,20})"/);
   if (sellerIdMatch) result.sellerId = sellerIdMatch[1];
-
-  // Seller name
-  const nameMatch = sellerBlock.match(/"name"\s*:\s*"([^"]{2,80})"/);
-  if (nameMatch) result.sellerUsername = nameMatch[1];
-
-  // ── marketplace_rating block (nested inside seller) ───────────────────────
-  // Structure: "marketplace_rating":{"count":12,"average_overall_rating":4.8,...}
-  const ratingBlock = extractBlock(sellerBlock, "marketplace_rating") ||
-                      extractBlock(combined,    "marketplace_rating") || "";
-
-  if (ratingBlock) {
-    const countMatch = ratingBlock.match(/"count"\s*:\s*(\d+)/);
-    if (countMatch) result.sellerReviewCount = parseInt(countMatch[1], 10);
-
-    const avgMatch = ratingBlock.match(/"average_overall_rating"\s*:\s*([\d.]+)/);
-    if (avgMatch) result.sellerAvgRating = parseFloat(avgMatch[1]);
+  // Fallback: seller ID embedded in a /marketplace/profile/ URL in the relay text
+  if (!result.sellerId) {
+    const profileLink = combined.match(/\/marketplace\/profile\/(\d{5,20})/);
+    if (profileLink) result.sellerId = profileLink[1];
   }
 
-  // Fallback patterns if marketplace_rating block wasn't found
+  // ── Seller username (display name) ───────────────────────────────────────
+  // Primary: "name" key directly inside the seller block (most common)
+  const nameMatch = sellerBlock.match(/"name"\s*:\s*"([^"]{2,80})"/);
+  if (nameMatch) result.sellerUsername = nameMatch[1];
+  // Fallback 1: "username" key — some FB business accounts expose a handle
+  if (!result.sellerUsername) {
+    const unMatch = sellerBlock.match(/"username"\s*:\s*"([^"]{2,80})"/)
+                 || combined.match(/"marketplace_listing_seller"[^}]{0,500}"username"\s*:\s*"([^"]{2,80})"/);
+    if (unMatch) result.sellerUsername = unMatch[1];
+  }
+  // Fallback 2: "display_name" / "actor_name" used in some older Relay schema versions
+  if (!result.sellerUsername) {
+    const dnMatch = (sellerBlock || combined).match(
+      /"(?:display_name|actor_name|viewer_name)"\s*:\s*"([^"]{2,80})"/
+    );
+    if (dnMatch) result.sellerUsername = dnMatch[1];
+  }
+
+  // ── marketplace_rating (review count + average) ────────────────────────────
+  // Structure: "marketplace_rating":{"count":12,"average_overall_rating":4.8,...}
+  // This is a FLAT object (no nested braces) — targeted regex is safer than extractBlock()
+  // because brace-matching can be confused by escaped braces inside adjacent string values.
+  const ratingRegex = /"marketplace_rating"\s*:\s*\{([^{}]{0,500})\}/;
+  const ratingMatch = ratingRegex.exec(sellerBlock) || ratingRegex.exec(combined);
+  if (ratingMatch) {
+    const inner = ratingMatch[1];
+    // "count": integer total ratings for this seller
+    const countM = inner.match(/"count"\s*:\s*(\d+)/);
+    if (countM) result.sellerReviewCount = parseInt(countM[1], 10);
+    // "average_overall_rating": float on a 0–5 scale
+    const avgM = inner.match(/"average_overall_rating"\s*:\s*([\d.]+)/);
+    if (avgM) result.sellerAvgRating = parseFloat(avgM[1]);
+    // Prefer seller-specific count when FB splits buyer/seller ratings
+    const sellerOnlyM = inner.match(/"seller_review_count"\s*:\s*(\d+)/);
+    if (sellerOnlyM && !result.sellerReviewCount) {
+      result.sellerReviewCount = parseInt(sellerOnlyM[1], 10);
+    }
+  }
+  // Fallback 1 (review count): alternate key names FB has used across Relay versions
   if (!result.sellerReviewCount) {
     const m = (sellerBlock || combined).match(
       /"(?:seller_review_count|review_count|total_feedback_count|feedback_count|ratings_count)"\s*:\s*(\d+)/
     );
     if (m) result.sellerReviewCount = parseInt(m[1], 10);
   }
+  // Fallback 2 (review count): "N rating/review/feedback" visible text in the relay text
+  if (!result.sellerReviewCount) {
+    const textM = combined.match(/(\d+)\s+(?:ratings?|reviews?|feedback)\b/i);
+    if (textM) result.sellerReviewCount = parseInt(textM[1], 10);
+  }
+  // Fallback 1 (avg rating): alternate key names for the average rating value
   if (!result.sellerAvgRating) {
     const m = (sellerBlock || combined).match(
       /"(?:seller_average_rating|average_overall_rating|average_star_rating|star_rating)"\s*:\s*([\d.]+)/
     );
     if (m) result.sellerAvgRating = parseFloat(m[1]);
   }
+  // Fallback 2 (avg rating): "4.8 out of 5" / "4.8 stars" / "4.8★" visible text
+  if (!result.sellerAvgRating) {
+    const textM = combined.match(/([\d.]+)\s*(?:out of 5|stars?|★)/i);
+    if (textM) {
+      const v = parseFloat(textM[1]);
+      if (v >= 0 && v <= 5) result.sellerAvgRating = v;
+    }
+  }
 
-  // ── Registration date → account age ──────────────────────────────────────
-  // "registration_date":{"time":1523456789,"timezone":0}
-  const regBlock = extractBlock(sellerBlock, "registration_date") ||
-                   extractBlock(combined,    "registration_date") || "";
-  const timeMatch = regBlock.match(/"time"\s*:\s*(\d{9,11})/);
-  if (timeMatch) result.sellerAccountAge = daysAgo(parseInt(timeMatch[1], 10));
-
+  // ── Account age (registration date) ──────────────────────────────────────
+  // Primary: "registration_date":{"time":1523456789,"timezone":0}
+  // FLAT object — targeted regex instead of extractBlock() for the same reason as above.
+  const regRegex = /"registration_date"\s*:\s*\{([^{}]{0,200})\}/;
+  const regMatch  = regRegex.exec(sellerBlock) || regRegex.exec(combined);
+  if (regMatch) {
+    // "time" is a 9–11-digit Unix timestamp in seconds
+    const timeM = regMatch[1].match(/"time"\s*:\s*(\d{9,11})/);
+    if (timeM) result.sellerAccountAge = daysAgo(parseInt(timeM[1], 10));
+  }
+  // Fallback 1: ISO date string in "member_since" / "account_creation_time" JSON fields
   if (result.sellerAccountAge === null) {
-    // Text fallback: "Member since March 2019"
-    const msMatch = (sellerBlock || combined).match(/[Mm]ember since ([A-Z][a-z]+ \d{4})/);
-    if (msMatch) {
-      const d = new Date(msMatch[1]);
+    const isoM = (sellerBlock || combined).match(
+      /"(?:member_since|account_creation_time|created_time)"\s*:\s*"([^"]{8,30})"/
+    );
+    if (isoM) result.sellerAccountAge = daysAgo(isoM[1]);
+  }
+  // Fallback 2: "Member since Month YYYY" visible text rendered on the page
+  if (result.sellerAccountAge === null) {
+    const textM = (sellerBlock || combined).match(/[Mm]ember since ([A-Z][a-z]+ \d{4})/);
+    if (textM) {
+      const d = new Date(textM[1]);
       if (!isNaN(d.getTime())) result.sellerAccountAge = daysAgo(d.getTime() / 1000);
     }
   }
 
   // ── Verified status ───────────────────────────────────────────────────────
+  // Three separate key names used by FB across different Relay schema versions
   result.sellerIsVerified =
     /"is_verified_user"\s*:\s*true/.test(sellerBlock || combined) ||
-    /"id_verified"\s*:\s*true/.test(sellerBlock || combined) ||
+    /"id_verified"\s*:\s*true/.test(sellerBlock || combined)      ||
     /"is_verified"\s*:\s*true/.test(sellerBlock);
 
   // ── Category ─────────────────────────────────────────────────────────────
@@ -155,6 +227,7 @@ function extractFromRelayStore() {
   if (locMatch) result.location = locMatch[1];
 
   // ── Images ───────────────────────────────────────────────────────────────
+  // Match FB CDN image URIs (scontent or fbcdn hostnames, common image extensions)
   const imgRegex = /"uri"\s*:\s*"(https:\/\/[^"]*(?:scontent|fbcdn)[^"]*\.(?:jpg|jpeg|png|webp)[^"]*)"/g;
   const seen = new Set();
   let m;
@@ -196,25 +269,30 @@ async function fetchSellerProfile(sellerId) {
       .filter((t) => t.includes("marketplace_rating") || t.includes("registration_date") || t.includes("seller"))
       .join("\n");
 
-    // marketplace_rating block on the profile page
-    const ratingBlock = extractBlock(combined, "marketplace_rating") || "";
-    if (ratingBlock) {
-      const countMatch = ratingBlock.match(/"count"\s*:\s*(\d+)/);
+    // marketplace_rating block on the profile page.
+    // FLAT object — use targeted regex instead of extractBlock() to avoid failures
+    // when adjacent string values contain escaped braces.
+    const ratingRegex = /"marketplace_rating"\s*:\s*\{([^{}]{0,500})\}/;
+    const ratingMatch = ratingRegex.exec(combined);
+    if (ratingMatch) {
+      const inner = ratingMatch[1];
+      const countMatch = inner.match(/"count"\s*:\s*(\d+)/);
       if (countMatch) result.sellerReviewCount = parseInt(countMatch[1], 10);
 
-      const avgMatch = ratingBlock.match(/"average_overall_rating"\s*:\s*([\d.]+)/);
+      const avgMatch = inner.match(/"average_overall_rating"\s*:\s*([\d.]+)/);
       if (avgMatch) result.sellerAvgRating = parseFloat(avgMatch[1]);
 
-      // Separate buyer/seller counts
-      const sellerCountMatch = ratingBlock.match(/"seller_review_count"\s*:\s*(\d+)/);
+      // Prefer seller-specific count when FB splits buyer/seller ratings
+      const sellerCountMatch = inner.match(/"seller_review_count"\s*:\s*(\d+)/);
       if (sellerCountMatch && !result.sellerReviewCount) {
         result.sellerReviewCount = parseInt(sellerCountMatch[1], 10);
       }
     }
 
-    // Registration date
-    const regBlock = extractBlock(combined, "registration_date") || "";
-    const timeMatch = regBlock.match(/"time"\s*:\s*(\d{9,11})/);
+    // registration_date block — also flat, same targeted regex approach
+    const regRegex = /"registration_date"\s*:\s*\{([^{}]{0,200})\}/;
+    const regMatch  = regRegex.exec(combined);
+    const timeMatch = regMatch ? regMatch[1].match(/"time"\s*:\s*(\d{9,11})/) : null;
     if (timeMatch) result.sellerAccountAge = daysAgo(parseInt(timeMatch[1], 10));
 
     // Verified
