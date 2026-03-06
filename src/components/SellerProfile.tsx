@@ -4,6 +4,9 @@ interface Props {
   reviewCount: number | null;
   avgRating:   number | null;
   isVerified:  boolean;
+  profileUrl:  string | null;
+  location:    string | null;
+  itemsSold:   number | null;
 }
 
 function Star({ filled }: { filled: boolean }) {
@@ -43,7 +46,7 @@ function formatAge(days: number): string {
   return `${(days / 365).toFixed(1)}yr`;
 }
 
-export function SellerProfile({ username, accountAge, reviewCount, avgRating, isVerified }: Props) {
+export function SellerProfile({ username, accountAge, reviewCount, avgRating, isVerified, profileUrl, location, itemsSold }: Props) {
   const risk = statRisk(accountAge, reviewCount);
   const colors = RISK_COLORS[risk];
 
@@ -55,26 +58,40 @@ export function SellerProfile({ username, accountAge, reviewCount, avgRating, is
 
       {/* Username row */}
       <div className="flex items-center gap-3 mb-5">
-        <div className="h-10 w-10 rounded-full bg-[#1a2235] border border-[#1e2a3f] flex items-center justify-center text-slate-400 text-sm font-bold mono">
+        <div className="h-10 w-10 rounded-full bg-[#1a2235] border border-[#1e2a3f] flex items-center justify-center text-slate-400 text-sm font-bold mono shrink-0">
           {username ? username.slice(0, 2).toUpperCase() : "??"}
         </div>
-        <div>
-          <p className="font-semibold text-white">
-            {username || "Unknown seller"}
-          </p>
-          {isVerified && (
-            <span className="inline-flex items-center gap-1 text-xs text-green-400">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3">
-                <path fillRule="evenodd" d="M8.603 3.799A4.49 4.49 0 0112 2.25c1.357 0 2.573.6 3.397 1.549a4.49 4.49 0 013.498 1.307 4.491 4.491 0 011.307 3.497A4.49 4.49 0 0121.75 12a4.49 4.49 0 01-1.549 3.397 4.491 4.491 0 01-1.307 3.497 4.491 4.491 0 01-3.497 1.307A4.49 4.49 0 0112 21.75a4.49 4.49 0 01-3.397-1.549 4.49 4.49 0 01-3.497-1.307 4.492 4.492 0 01-1.307-3.497A4.49 4.49 0 012.25 12c0-1.357.6-2.573 1.549-3.397a4.49 4.49 0 011.307-3.497 4.49 4.49 0 013.497-1.307zm7.007 6.387a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" />
-              </svg>
-              Verified
-            </span>
+        <div className="min-w-0">
+          {profileUrl ? (
+            <a
+              href={profileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-white hover:text-blue-400 transition-colors truncate block"
+            >
+              {username || "Unknown seller"}
+            </a>
+          ) : (
+            <p className="font-semibold text-white truncate">{username || "Unknown seller"}</p>
           )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {isVerified && (
+              <span className="inline-flex items-center gap-1 text-xs text-green-400">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3">
+                  <path fillRule="evenodd" d="M8.603 3.799A4.49 4.49 0 0112 2.25c1.357 0 2.573.6 3.397 1.549a4.49 4.49 0 013.498 1.307 4.491 4.491 0 011.307 3.497A4.49 4.49 0 0121.75 12a4.49 4.49 0 01-1.549 3.397 4.491 4.491 0 01-1.307 3.497 4.491 4.491 0 01-3.497 1.307A4.49 4.49 0 0112 21.75a4.49 4.49 0 01-3.397-1.549 4.49 4.49 0 01-3.497-1.307 4.492 4.492 0 01-1.307-3.497A4.49 4.49 0 012.25 12c0-1.357.6-2.573 1.549-3.397a4.49 4.49 0 011.307-3.497 4.49 4.49 0 013.497-1.307zm7.007 6.387a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" />
+                </svg>
+                Verified
+              </span>
+            )}
+            {location && (
+              <span className="text-xs text-slate-500 truncate">{location}</span>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Stats grid */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         {/* Account age */}
         <div className={`rounded-lg border p-3 text-center ${accountAge !== null && accountAge < 30 ? `${colors.bg} ${colors.border}` : "bg-[#111827] border-[#1e2a3f]"}`}>
           <p className="text-[10px] text-slate-500 mono uppercase tracking-wider mb-1">Age</p>
@@ -96,6 +113,14 @@ export function SellerProfile({ username, accountAge, reviewCount, avgRating, is
           <p className="text-[10px] text-slate-500 mono uppercase tracking-wider mb-1">Rating</p>
           <p className="text-lg font-bold mono text-white">
             {avgRating !== null ? avgRating.toFixed(1) : "—"}
+          </p>
+        </div>
+
+        {/* Items sold */}
+        <div className="rounded-lg border border-[#1e2a3f] bg-[#111827] p-3 text-center">
+          <p className="text-[10px] text-slate-500 mono uppercase tracking-wider mb-1">Sold</p>
+          <p className="text-lg font-bold mono text-white">
+            {itemsSold !== null ? itemsSold.toLocaleString() : "—"}
           </p>
         </div>
       </div>

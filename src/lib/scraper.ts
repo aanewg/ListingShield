@@ -13,6 +13,9 @@ export interface ScrapedListing {
   sellerReviewCount?: number;
   sellerAvgRating?:   number;          // 0–5 scale
   sellerIsVerified?:  boolean;
+  sellerProfileUrl?:  string;          // direct link to seller profile page
+  sellerLocation?:    string;          // city/state/country text
+  sellerItemsSold?:   number;          // completed sales or active listings
   category?:          string;
   platform?:          string;          // auto-detected platform
   partial?:           boolean;         // true when some fields are missing
@@ -464,6 +467,19 @@ function extractEbayData(html: string): Partial<ScrapedListing> {
     data.sellerIsVerified = true;
   }
 
+  // ── Profile URL ───────────────────────────────────────────────────────────
+  if (data.sellerUsername) {
+    data.sellerProfileUrl = `https://www.ebay.com/usr/${data.sellerUsername}`;
+  }
+
+  // ── Location ──────────────────────────────────────────────────────────────
+  const itemLoc = html.match(/"itemLocation"\s*:\s*"([^"]{2,100})"/)?.[1];
+  if (itemLoc) data.sellerLocation = decodeEntities(itemLoc);
+  if (!data.sellerLocation) {
+    const locText = html.match(/[Ll]ocated\s+in\s*:\s*([A-Za-z][^<"\n]{2,60})/)?.[1]?.trim();
+    if (locText) data.sellerLocation = locText;
+  }
+
   return data;
 }
 
@@ -504,6 +520,11 @@ function extractMercariData(html: string): Partial<ScrapedListing> {
           const days = daysAgo(created as string | number);
           if (days !== null) data.sellerAccountAge = days;
         }
+        // Profile URL — constructed from numeric seller ID
+        if (s.id) data.sellerProfileUrl = `https://www.mercari.com/u/${String(s.id)}`;
+        // Location
+        const loc = s.location ?? s.prefecture;
+        if (typeof loc === "string" && loc.trim()) data.sellerLocation = loc.trim();
       }
     }
   } catch { /* __NEXT_DATA__ missing or malformed — fall through to regex patterns */ }
@@ -581,6 +602,17 @@ function extractPoshmarkData(html: string): Partial<ScrapedListing> {
           const days = daysAgo(joined as string | number);
           if (days !== null) data.sellerAccountAge = days;
         }
+        // Profile URL — constructed from handle
+        if (s.handle) data.sellerProfileUrl = `https://poshmark.com/closet/${String(s.handle)}`;
+        // Location
+        const city = s.city_state ?? s.city;
+        if (typeof city === "string" && city.trim()) data.sellerLocation = city.trim();
+        // Items sold / completed trades
+        const sold = s.sold_count ?? s.completed_trades_count;
+        if (sold !== null && sold !== undefined) {
+          const n = parseInt(String(sold), 10);
+          if (!isNaN(n) && n >= 0) data.sellerItemsSold = n;
+        }
       }
     }
   } catch { /* __NEXT_DATA__ missing or malformed — fall through to regex patterns */ }
@@ -648,6 +680,19 @@ function extractDepopData(html: string): Partial<ScrapedListing> {
         if (created !== undefined && created !== null) {
           const days = daysAgo(created as string | number);
           if (days !== null) data.sellerAccountAge = days;
+        }
+        // Profile URL — constructed from username
+        if (s.username) data.sellerProfileUrl = `https://www.depop.com/${String(s.username)}`;
+        // Location
+        const country = s.country ?? s.countryName ?? s.location;
+        if (typeof country === "string" && country.trim()) data.sellerLocation = country.trim();
+        // Items sold — stored in a badges array
+        const badges = s.badges as unknown[] | undefined;
+        if (Array.isArray(badges)) {
+          for (const b of badges) {
+            const bObj = b as Record<string, unknown>;
+            if (typeof bObj.soldItems === "number") { data.sellerItemsSold = bObj.soldItems; break; }
+          }
         }
       }
     }
@@ -788,8 +833,11 @@ export async function scrapeListing(url: string): Promise<ScrapedListing | null>
 
   if (!title) return null;
 
-  // Merge account age from platform-specific data
+  // Merge account age and new fields from platform-specific data
   const sellerAccountAge = pd.sellerAccountAge;
+  const sellerProfileUrl = pd.sellerProfileUrl;
+  const sellerLocation   = pd.sellerLocation;
+  const sellerItemsSold  = pd.sellerItemsSold;
 
   return {
     title:            title.trim(),
@@ -798,6 +846,9 @@ export async function scrapeListing(url: string): Promise<ScrapedListing | null>
     imageUrls:        [...new Set(imageUrls)].slice(0, 5),
     sellerUsername,
     sellerAccountAge,
+    sellerProfileUrl,
+    sellerLocation,
+    sellerItemsSold,
     sellerReviewCount,
     sellerAvgRating,
     sellerIsVerified,

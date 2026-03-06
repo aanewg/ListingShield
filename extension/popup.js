@@ -124,6 +124,7 @@ el("btn-analyze").addEventListener("click", async () => {
       fmt(hasAge     ? `${data.sellerAccountAge} days`   : null, "Account age"),
       fmt(hasReviews ? data.sellerReviewCount             : null, "Reviews"),
       fmt(hasRating  ? data.sellerAvgRating               : null, "Avg rating"),
+      fmt(data.location,          "Location"),
       fmt(hasImgs    ? `${data.imageUrls.length} image(s)`: null, "Images"),
     ].join("");
 

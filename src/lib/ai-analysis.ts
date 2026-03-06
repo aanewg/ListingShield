@@ -1,7 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { DetectedFlag, TrustTier } from "@/types";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Lazy init: key is read from env only when a real request is made,
+// not at module load / cold-start. Prevents the key from being captured
+// in any module-level snapshot or bundle analysis.
+let _client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!_client) _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return _client;
+}
 
 export interface AIFlag {
   title:       string;
@@ -106,7 +113,7 @@ Respond with ONLY a JSON object in this exact shape:
 Only include additionalFlags for concerns NOT already captured in the rule-based flags above. Return an empty array if nothing new was found.`;
 
   try {
-    const message = await client.messages.create({
+    const message = await getClient().messages.create({
       model:      "claude-sonnet-4-6",
       max_tokens: 1024,
       messages:   [{ role: "user", content: prompt }],

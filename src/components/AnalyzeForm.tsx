@@ -40,6 +40,9 @@ interface InitialData {
   sellerReviewCount?: number;
   sellerAvgRating?:   number;
   sellerIsVerified?:  boolean;
+  sellerProfileUrl?:  string;
+  sellerLocation?:    string;
+  sellerItemsSold?:   number;
 }
 
 interface Props {
@@ -106,12 +109,15 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
   const [price,       setPrice]       = useState(initialData?.price != null ? String(initialData.price) : "");
   const [category,    setCategory]    = useState<Category | "">(initialData?.category ?? "");
   const [listingUrl,  setListingUrl]  = useState(initialUrl);
-  const [sellerUser,  setSellerUser]  = useState(initialData?.sellerUsername    ?? "");
-  const [accountAge,  setAccountAge]  = useState(initialData?.sellerAccountAge  != null ? String(initialData.sellerAccountAge)  : "");
-  const [reviewCount, setReviewCount] = useState(initialData?.sellerReviewCount != null ? String(initialData.sellerReviewCount) : "");
-  const [avgRating,   setAvgRating]   = useState(initialData?.sellerAvgRating   != null ? String(initialData.sellerAvgRating)   : "");
-  const [isVerified,  setIsVerified]  = useState(initialData?.sellerIsVerified  ?? false);
-  const [imageUrls,   setImageUrls]   = useState(initialData?.imageUrls?.join(", ") ?? "");
+  const [sellerUser,    setSellerUser]    = useState(initialData?.sellerUsername   ?? "");
+  const [accountAge,    setAccountAge]    = useState(initialData?.sellerAccountAge  != null ? String(initialData.sellerAccountAge)  : "");
+  const [reviewCount,   setReviewCount]   = useState(initialData?.sellerReviewCount != null ? String(initialData.sellerReviewCount) : "");
+  const [avgRating,     setAvgRating]     = useState(initialData?.sellerAvgRating   != null ? String(initialData.sellerAvgRating)   : "");
+  const [isVerified,    setIsVerified]    = useState(initialData?.sellerIsVerified  ?? false);
+  const [sellerProfile, setSellerProfile] = useState(initialData?.sellerProfileUrl  ?? "");
+  const [sellerLoc,     setSellerLoc]     = useState(initialData?.sellerLocation    ?? "");
+  const [itemsSold,     setItemsSold]     = useState(initialData?.sellerItemsSold   != null ? String(initialData.sellerItemsSold) : "");
+  const [imageUrls,     setImageUrls]     = useState(initialData?.imageUrls?.join(", ") ?? "");
 
   // ── Effects ───────────────────────────────────────────────────────────────
   // If a URL was provided (came from the home page input), auto-submit immediately
@@ -151,8 +157,10 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
           message?: string;
           partial?: {
             title?: string; description?: string; imageUrls?: string[];
-            sellerUsername?: string; sellerReviewCount?: number;
-            sellerAvgRating?: number; sellerIsVerified?: boolean; category?: string;
+            sellerUsername?: string; sellerAccountAge?: number;
+            sellerReviewCount?: number; sellerAvgRating?: number;
+            sellerIsVerified?: boolean; sellerProfileUrl?: string;
+            sellerLocation?: string; sellerItemsSold?: number; category?: string;
           };
         };
 
@@ -162,9 +170,13 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
           if (data.partial.description?.trim()) setDescription(data.partial.description);
           if (data.partial.imageUrls?.length)  setImageUrls(data.partial.imageUrls.join(", "));
           if (data.partial.sellerUsername)     setSellerUser(data.partial.sellerUsername);
+          if (data.partial.sellerAccountAge  != null) setAccountAge(String(data.partial.sellerAccountAge));
           if (data.partial.sellerReviewCount != null) setReviewCount(String(data.partial.sellerReviewCount));
           if (data.partial.sellerAvgRating   != null) setAvgRating(String(data.partial.sellerAvgRating));
           if (data.partial.sellerIsVerified)   setIsVerified(true);
+          if (data.partial.sellerProfileUrl)   setSellerProfile(data.partial.sellerProfileUrl);
+          if (data.partial.sellerLocation)     setSellerLoc(data.partial.sellerLocation);
+          if (data.partial.sellerItemsSold   != null) setItemsSold(String(data.partial.sellerItemsSold));
           if (data.partial.category)           setCategory(data.partial.category as Category);
           setListingUrl(targetUrl);
           setPlatform(targetPlatform);
@@ -253,17 +265,20 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
       }
 
       // Populate every field we got back
-      if (data.platform)            setPlatform(data.platform as Platform);
+      if (data.platform)             setPlatform(data.platform as Platform);
       if (data.title?.trim())        setTitle(data.title.trim());
       if (data.description?.trim())  setDescription(data.description.trim());
       if (data.price != null)        setPrice(String(data.price));
       if (data.category)             setCategory(data.category as Category);
       if (data.imageUrls?.length)    setImageUrls(data.imageUrls.join(", "));
       if (data.sellerUsername)       setSellerUser(data.sellerUsername);
-      if (data.sellerAccountAge != null) setAccountAge(String(data.sellerAccountAge));
+      if (data.sellerAccountAge  != null) setAccountAge(String(data.sellerAccountAge));
       if (data.sellerReviewCount != null) setReviewCount(String(data.sellerReviewCount));
       if (data.sellerAvgRating   != null) setAvgRating(String(data.sellerAvgRating));
       if (data.sellerIsVerified)     setIsVerified(true);
+      if (data.sellerProfileUrl)     setSellerProfile(data.sellerProfileUrl);
+      if (data.sellerLocation)       setSellerLoc(data.sellerLocation);
+      if (data.sellerItemsSold   != null) setItemsSold(String(data.sellerItemsSold));
 
       setFetchState("done");
       setShowManual(true);
@@ -297,11 +312,14 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
       price:             parseFloat(price),
       category:          category || undefined,
       listingUrl:        listingUrl.trim() || undefined,
-      sellerUsername:    sellerUser.trim() || undefined,
-      sellerAccountAge:  accountAge  ? parseInt(accountAge)   : undefined,
-      sellerReviewCount: reviewCount ? parseInt(reviewCount)  : undefined,
-      sellerAvgRating:   avgRating   ? parseFloat(avgRating)  : undefined,
+      sellerUsername:    sellerUser.trim()    || undefined,
+      sellerAccountAge:  accountAge           ? parseInt(accountAge)    : undefined,
+      sellerReviewCount: reviewCount          ? parseInt(reviewCount)   : undefined,
+      sellerAvgRating:   avgRating            ? parseFloat(avgRating)   : undefined,
       sellerIsVerified:  isVerified,
+      sellerProfileUrl:  sellerProfile.trim() || undefined,
+      sellerLocation:    sellerLoc.trim()     || undefined,
+      sellerItemsSold:   itemsSold            ? parseInt(itemsSold)     : undefined,
       imageUrls:         imageUrls ? imageUrls.split(",").map((u) => u.trim()).filter(Boolean) : undefined,
     };
 
@@ -562,6 +580,29 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
               value={avgRating}
               onChange={(e) => setAvgRating(e.target.value)}
               placeholder="e.g. 4.8"
+            />
+          </div>
+        </div>
+
+        {/* Location + Items Sold */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label optional>Location</Label>
+            <Input
+              type="text"
+              value={sellerLoc}
+              onChange={(e) => setSellerLoc(e.target.value)}
+              placeholder="e.g. Austin, TX"
+            />
+          </div>
+          <div>
+            <Label optional>Items Sold</Label>
+            <Input
+              type="number"
+              min="0"
+              value={itemsSold}
+              onChange={(e) => setItemsSold(e.target.value)}
+              placeholder="e.g. 120"
             />
           </div>
         </div>

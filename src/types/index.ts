@@ -52,6 +52,21 @@ export type ReportType =
   | "bait_switch"
   | "other";
 
+// ─── Normalized seller schema ─────────────────────────────────────────────────
+// Shared across all extraction paths: scraper, extension, screenshot AI.
+// Every field is optional so partial extraction always compiles cleanly.
+
+export interface SellerInfo {
+  username:     string | null;
+  profileUrl:   string | null;  // direct link to seller's profile page
+  avgRating:    number | null;  // 0–5 scale
+  reviewCount:  number | null;
+  accountAge:   number | null;  // days since account creation
+  isVerified:   boolean;
+  itemsSold:    number | null;  // completed transactions or active listing count
+  location:     string | null;  // city/state/country text, normalised to null if absent
+}
+
 // ─── Detection engine types ────────────────────────────────────────────────────
 
 export interface DetectedFlag {
@@ -106,10 +121,13 @@ export interface AnalyzeRequest {
   price: number;
   category?: Category;
   sellerUsername?: string;
-  sellerAccountAge?: number; // days
+  sellerProfileUrl?: string;   // direct link to seller profile
+  sellerAccountAge?: number;   // days
   sellerReviewCount?: number;
   sellerAvgRating?: number;
   sellerIsVerified?: boolean;
+  sellerLocation?: string;     // city/state/country text
+  sellerItemsSold?: number;    // completed sales or active listing count
   imageUrls?: string[];
   listingUrl?: string;
 }
@@ -134,10 +152,13 @@ export interface FullAnalysis {
   marketAvgPrice: number | null;
   category: Category | null;
   sellerUsername: string | null;
+  sellerProfileUrl: string | null;
   sellerAccountAge: number | null;
   sellerReviewCount: number | null;
   sellerAvgRating: number | null;
   sellerIsVerified: boolean;
+  sellerLocation: string | null;
+  sellerItemsSold: number | null;
   imageUrls: string[];
   trustScore: number;
   trustTier: TrustTier;

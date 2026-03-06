@@ -93,6 +93,10 @@ export default async function ResultsPage({
     ? JSON.parse(analysis.aiAnalysis as string) as AIAnalysisResult
     : null;
 
+  const sellerProfileUrl = analysis.sellerProfileUrl;
+  const sellerLocation   = analysis.sellerLocation;
+  const sellerItemsSold  = analysis.sellerItemsSold;
+
   const flags: DetectedFlag[] = analysis.riskFlags.map((f) => ({
     flagType: f.flagType as DetectedFlag["flagType"],
     severity: f.severity as DetectedFlag["severity"],
@@ -199,6 +203,9 @@ export default async function ResultsPage({
             reviewCount={analysis.sellerReviewCount}
             avgRating={analysis.sellerAvgRating}
             isVerified={analysis.sellerIsVerified}
+            profileUrl={sellerProfileUrl}
+            location={sellerLocation}
+            itemsSold={sellerItemsSold}
           />
         </div>
 

@@ -23,6 +23,9 @@ model ListingAnalysis {
   sellerReviewCount Int?
   sellerAvgRating   Float?
   sellerIsVerified  Boolean    @default(false)
+  sellerProfileUrl  String?
+  sellerLocation    String?
+  sellerItemsSold   Int?
   imageUrls         String?    // JSON-encoded string[]
   trustScore        Int        // 0-100 (blended rule + AI score)
   trustTier         String     // "highly_trusted" | "looks_good" | "caution" | "risky" | "likely_scam"
