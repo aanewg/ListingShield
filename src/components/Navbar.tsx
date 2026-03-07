@@ -7,10 +7,11 @@ export function Navbar() {
   const pathname = usePathname();
 
   // "/" and "/analyze" both count as the "Analyze" section
-  const isAnalyze   = pathname === "/" || pathname === "/analyze";
-  const isReports   = pathname.startsWith("/reports") || pathname === "/report";
-  const isDashboard = pathname === "/dashboard";
-  const isResults   = pathname.startsWith("/results");
+  const isAnalyze    = pathname === "/" || pathname === "/analyze";
+  const isReports    = pathname.startsWith("/reports") || pathname === "/report";
+  const isDashboard  = pathname === "/dashboard";
+  const isResults    = pathname.startsWith("/results");
+  const isExtension  = pathname === "/extension";
 
   function navCls(active: boolean) {
     return active
@@ -43,6 +44,9 @@ export function Navbar() {
           </Link>
           <Link href="/dashboard" className={navCls(isDashboard)}>
             Dashboard
+          </Link>
+          <Link href="/extension" className={navCls(isExtension)}>
+            Extension
           </Link>
           <Link
             href="/analyze"

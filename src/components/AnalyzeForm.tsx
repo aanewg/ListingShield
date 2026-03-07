@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { AnalysisLoader } from "./AnalysisLoader";
 import type { Platform, Category } from "@/types";
 import type { ScrapedListing } from "@/lib/scraper";
@@ -356,6 +357,36 @@ export function AnalyzeForm({ initialUrl = "", initialPlatform, initialData }: P
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Facebook extension nudge — shown when platform is facebook and no data pre-filled */}
+      {platform === "facebook" && !initialData && (
+        <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 h-8 w-8 rounded-lg bg-blue-500/20 border border-blue-500/30 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth={2} className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-white mb-0.5">Facebook Marketplace works differently</p>
+              <p className="text-xs text-blue-300/70 leading-relaxed mb-3">
+                Prices and seller info are hidden without login. Use the Chrome extension for full automatic analysis, or upload a screenshot — Claude reads the data directly from the image.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/extension"
+                  className="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 transition-colors"
+                >
+                  Get the Extension →
+                </Link>
+                <span className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3.5 py-1.5 text-xs font-semibold text-blue-400">
+                  Or upload a screenshot below ↓
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}

@@ -21,11 +21,12 @@ export function Footer() {
 
           {/* Links */}
           <nav className="flex flex-wrap items-center justify-center gap-5 text-xs text-slate-500">
-            <Link href="/"          className="hover:text-slate-300 transition-colors">Analyze</Link>
-            <Link href="/analyze"   className="hover:text-slate-300 transition-colors">Manual Entry</Link>
-            <Link href="/reports"   className="hover:text-slate-300 transition-colors">Community Reports</Link>
-            <Link href="/dashboard" className="hover:text-slate-300 transition-colors">Dashboard</Link>
-            <Link href="/report"    className="hover:text-red-400 transition-colors text-red-500/60">Report a Scam</Link>
+            <Link href="/"           className="hover:text-slate-300 transition-colors">Analyze</Link>
+            <Link href="/analyze"    className="hover:text-slate-300 transition-colors">Manual Entry</Link>
+            <Link href="/extension"  className="hover:text-slate-300 transition-colors">Chrome Extension</Link>
+            <Link href="/reports"    className="hover:text-slate-300 transition-colors">Community Reports</Link>
+            <Link href="/dashboard"  className="hover:text-slate-300 transition-colors">Dashboard</Link>
+            <Link href="/report"     className="hover:text-red-400 transition-colors text-red-500/60">Report a Scam</Link>
           </nav>
         </div>
 
